@@ -15,6 +15,14 @@ from typing import Any
 from urllib.parse import urlencode, urlparse
 
 from config import settings
+from integrations.whop_copy import (
+    success_page_heading,
+    success_page_preparing,
+    success_page_still_processing,
+    success_page_subtitle,
+    success_page_title,
+    success_page_wait_hint,
+)
 
 SUCCESS_PATH = "/whop/success"
 STATUS_PATH = "/api/claim/status"
@@ -98,7 +106,7 @@ def render_success_html(query_params: dict[str, str]) -> str:
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Payment successful — Fusion Strategy</title>
+  <title>{escape(success_page_title())}</title>
   <style>
     * {{ box-sizing: border-box; }}
     body {{
@@ -143,12 +151,12 @@ def render_success_html(query_params: dict[str, str]) -> str:
 </head>
 <body>
   <div class="card">
-    <h1>Payment successful</h1>
-    <p class="sub">Thank you for joining Fusion Strategy. Use the steps below to open Telegram access.</p>
+    <h1>{escape(success_page_heading())}</h1>
+    <p class="sub">{escape(success_page_subtitle())}</p>
 
     <div id="loading">
       <div class="spinner"></div>
-      <p class="sub">Preparing your activation code…</p>
+      <p class="sub">{escape(success_page_preparing())}</p>
     </div>
 
     <div id="ready" class="hidden">
@@ -159,9 +167,9 @@ def render_success_html(query_params: dict[str, str]) -> str:
     </div>
 
     <div id="wait" class="hidden">
-      <p class="sub">Still processing your payment.</p>
+      <p class="sub">{escape(success_page_still_processing())}</p>
       <a class="btn" href="{claim_url}" target="_blank" rel="noopener">Open Telegram bot</a>
-      <p class="hint">Send <span class="cmd">/claim</span> in the bot, then reply with the <strong>email</strong> you used on Whop.</p>
+      <p class="hint">{success_page_wait_hint()}</p>
     </div>
   </div>
   <script>

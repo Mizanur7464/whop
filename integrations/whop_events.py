@@ -26,6 +26,7 @@ from airtable import sync as airtable_sync
 from bot import storage
 from config import settings
 from integrations import plan_mapping, telegram_ops
+from integrations.whop_copy import is_free_access, membership_received_dm
 
 Handler = Callable[[dict], Awaitable[None]]
 
@@ -196,16 +197,13 @@ async def on_membership_valid(payload: dict) -> None:
     bot_username = (settings.telegram_bot_username or "").lstrip("@")
     bot_link = f"https://t.me/{bot_username}" if bot_username else "our Telegram bot"
     base = public_app_base_url()
-    success_hint = f"{base}/whop/success" if base else "the payment success page"
-    dm_lines = [
-        "Your Whop payment was received.",
-        "",
-        "To get your Telegram group invite:",
-        f"1. Open {success_hint} (your activation code is there), or",
-        f"2. Open {bot_link} → send `/claim` → reply with your Whop email.",
-        "",
-        "Your invite link will appear in Telegram.",
-    ]
+    if base:
+        success_hint = f"{base}/whop/success"
+    elif is_free_access():
+        success_hint = "the activation page"
+    else:
+        success_hint = "the payment success page"
+    dm_lines = membership_received_dm(success_hint=success_hint, bot_link=bot_link)
     if checkout_email:
         dm_lines.insert(
             2,
@@ -307,6 +305,10 @@ async def on_payment_succeeded(payload: dict) -> None:
 
 
 async def on_payment_failed(payload: dict) -> None:
+    if is_free_access():
+        logger.info("payment_failed ignored — WHOP_FREE_ACCESS is enabled")
+        return
+
     """Notify user politely so they can update card."""
     entity = _data(payload)
     whop_user = _whop_user_id(entity)

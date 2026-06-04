@@ -24,28 +24,13 @@ from bot.channel_context import ensure_private_dm
 from bot.community_layout import FLOW_WELCOME
 from bot.decorators import is_admin, log_call
 from integrations import plan_mapping, telegram_ops
+from integrations.whop_copy import (
+    claim_code_not_found,
+    claim_email_not_found,
+    claim_email_prompt,
+)
 
 USER_DATA_AWAITING_WHOP_EMAIL = "awaiting_whop_email"
-
-CLAIM_EMAIL_PROMPT = (
-    "Thanks for your Whop payment.\n\n"
-    "Reply with the *email address* you used at checkout "
-    "(one message). We will link your membership and send your "
-    "Telegram group invite here.\n\n"
-    "Have an 8-character code instead? Send `/claim YOURCODE`."
-)
-
-EMAIL_NOT_FOUND = (
-    "We could not find a payment for that email yet.\n\n"
-    "• Wait 30–60 seconds after paying, then try again.\n"
-    "• Use the same email as on your Whop receipt.\n"
-    "• Still stuck? Tap /support."
-)
-
-CLAIM_NOT_FOUND = (
-    "We couldn't find that claim code. It may have already been used.\n\n"
-    "Just paid? Send `/claim` and reply with your Whop checkout email."
-)
 
 CLAIM_SUCCESS = (
     "Your membership is linked.\n\n"
@@ -75,7 +60,7 @@ async def prompt_whop_activation(
         return
     begin_whop_email_activation(update, context)
     await update.message.reply_text(
-        CLAIM_EMAIL_PROMPT, parse_mode=ParseMode.MARKDOWN
+        claim_email_prompt(), parse_mode=ParseMode.MARKDOWN
     )
 
 
@@ -144,7 +129,7 @@ async def cmd_claim(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     if not claim:
         await update.message.reply_text(
-            CLAIM_NOT_FOUND,
+            claim_code_not_found(),
             reply_markup=keyboards.back_only(),
             parse_mode=ParseMode.MARKDOWN,
         )
@@ -190,7 +175,7 @@ async def on_whop_email_text(
     found = storage.find_pending_claim_by_email(text)
     if not found:
         await update.message.reply_text(
-            EMAIL_NOT_FOUND,
+            claim_email_not_found(),
             reply_markup=keyboards.back_only(),
             parse_mode=ParseMode.MARKDOWN,
         )
@@ -199,7 +184,9 @@ async def on_whop_email_text(
     code, claim = found
     claim = storage.pop_pending_claim(code)
     if not claim:
-        await update.message.reply_text(EMAIL_NOT_FOUND, parse_mode=ParseMode.MARKDOWN)
+        await update.message.reply_text(
+            claim_email_not_found(), parse_mode=ParseMode.MARKDOWN
+        )
         return
 
     context.user_data.pop(USER_DATA_AWAITING_WHOP_EMAIL, None)

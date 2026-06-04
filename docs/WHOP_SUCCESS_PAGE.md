@@ -1,5 +1,8 @@
 # Whop success page (activation code)
 
+Set `WHOP_FREE_ACCESS=true` in `.env` / Railway while using a **free** Whop link
+(tracking only — no “payment” wording in bot or success page).
+
 After checkout, redirect customers to:
 
 ```

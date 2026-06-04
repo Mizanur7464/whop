@@ -97,6 +97,8 @@ class Settings(BaseSettings):
     whop_product_basic: Optional[str] = Field(default=None, alias="WHOP_PRODUCT_BASIC")
     whop_product_premium: Optional[str] = Field(default=None, alias="WHOP_PRODUCT_PREMIUM")
     whop_product_vip: Optional[str] = Field(default=None, alias="WHOP_PRODUCT_VIP")
+    # True = free Whop link (tracking/activation only). False = paid checkout copy.
+    whop_free_access: bool = Field(default=False, alias="WHOP_FREE_ACCESS")
 
     # ---- Airtable ----
     airtable_api_key: str = Field(default="", alias="AIRTABLE_API_KEY")
