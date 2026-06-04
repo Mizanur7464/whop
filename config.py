@@ -113,6 +113,8 @@ class Settings(BaseSettings):
     webhook_port: int = Field(default=8000, alias="WEBHOOK_PORT")
     webhook_path: str = Field(default="/webhook/whop", alias="WEBHOOK_PATH")
     public_webhook_url: str = Field(default="", alias="PUBLIC_WEBHOOK_URL")
+    # Optional: https://your-app.up.railway.app (no path). If empty, derived from PUBLIC_WEBHOOK_URL.
+    public_app_base_url: str = Field(default="", alias="PUBLIC_APP_BASE_URL")
     safe_mode: bool = Field(default=True, alias="SAFE_MODE")
     rollout_mode: str = Field(default="new_only", alias="ROLLOUT_MODE")
     group_moderation_enabled: bool = Field(

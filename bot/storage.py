@@ -376,3 +376,29 @@ def find_pending_claim_by_email(email: str) -> Optional[tuple[str, dict]]:
         return None
     candidates.sort(key=lambda kv: kv[1].get("created_at", ""), reverse=True)
     return candidates[0]
+
+
+def find_pending_claim_by_membership_id(
+    membership_id: str,
+) -> Optional[tuple[str, dict]]:
+    """Peek at pending claim for Whop success page (does not consume the code)."""
+    mid = (membership_id or "").strip()
+    if not mid:
+        return None
+    candidates = [
+        (code, data)
+        for code, data in _pending_claims.items()
+        if (data.get("whop_membership_id") or "") == mid
+    ]
+    if not candidates:
+        return None
+    candidates.sort(key=lambda kv: kv[1].get("created_at", ""), reverse=True)
+    return candidates[0]
+
+
+def find_pending_claim_by_code(code: str) -> Optional[tuple[str, dict]]:
+    """Peek by claim code (success page fallback)."""
+    key = (code or "").strip().upper()
+    if not key or key not in _pending_claims:
+        return None
+    return key, dict(_pending_claims[key])

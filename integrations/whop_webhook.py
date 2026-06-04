@@ -23,12 +23,18 @@ import hmac
 import json
 from typing import Any
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Header, Request
-from fastapi.responses import JSONResponse
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Header, Query, Request
+from fastapi.responses import HTMLResponse, JSONResponse
 from loguru import logger
 
 from config import settings
 from integrations import whop_events
+from integrations.whop_success_page import (
+    SUCCESS_PATH,
+    STATUS_PATH,
+    lookup_claim_status,
+    render_success_html,
+)
 
 
 def create_app() -> FastAPI:
@@ -73,6 +79,25 @@ def create_app() -> FastAPI:
         background.add_task(whop_events.dispatch_event, payload)
 
         return JSONResponse({"received": True, "event": event_type})
+
+    @app.get(SUCCESS_PATH, response_class=HTMLResponse)
+    async def whop_success_page(request: Request) -> HTMLResponse:
+        """Buyer redirect target after Whop checkout."""
+        params = {k: v for k, v in request.query_params.items() if v}
+        return HTMLResponse(render_success_html(params))
+
+    @app.get(STATUS_PATH)
+    async def claim_status(
+        membership_id: str | None = Query(default=None),
+        membership: str | None = Query(default=None),
+        id: str | None = Query(default=None),
+        code: str | None = Query(default=None),
+        email: str | None = Query(default=None),
+    ) -> JSONResponse:
+        """Poll until webhook has created a pending claim."""
+        mid = membership_id or membership or id
+        payload = lookup_claim_status(membership_id=mid, code=code, email=email)
+        return JSONResponse(payload)
 
     return app
 

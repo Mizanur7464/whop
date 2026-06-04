@@ -191,17 +191,20 @@ async def on_membership_valid(payload: dict) -> None:
         f"membership={membership_id} email={checkout_email or '—'}"
     )
 
+    from integrations.whop_success_page import public_app_base_url
+
     bot_username = (settings.telegram_bot_username or "").lstrip("@")
     bot_link = f"https://t.me/{bot_username}" if bot_username else "our Telegram bot"
+    base = public_app_base_url()
+    success_hint = f"{base}/whop/success" if base else "the payment success page"
     dm_lines = [
         "Your Whop payment was received.",
         "",
         "To get your Telegram group invite:",
-        f"1. Open {bot_link}",
-        "2. Send `/claim`",
-        "3. Reply with the *email* you used on Whop (one message).",
+        f"1. Open {success_hint} (your activation code is there), or",
+        f"2. Open {bot_link} → send `/claim` → reply with your Whop email.",
         "",
-        "Your invite link will appear here automatically.",
+        "Your invite link will appear in Telegram.",
     ]
     if checkout_email:
         dm_lines.insert(
