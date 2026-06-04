@@ -15,6 +15,7 @@ For Telegram-only local dev (no webhook), use:
 from __future__ import annotations
 
 import asyncio
+import os
 import signal
 import sys
 
@@ -82,12 +83,21 @@ async def _run_bot(stop_event: asyncio.Event) -> None:
     await _shutdown_bot(app)
 
 
+def _listen_port() -> int:
+    """Railway/Render set PORT; local dev uses WEBHOOK_PORT from .env."""
+    raw = os.environ.get("PORT", "").strip()
+    if raw:
+        return int(raw)
+    return settings.webhook_port
+
+
 async def _run_webhook(stop_event: asyncio.Event) -> None:
+    port = _listen_port()
     app = create_webhook_app()
     config = uvicorn.Config(
         app,
         host=settings.webhook_host,
-        port=settings.webhook_port,
+        port=port,
         log_level=settings.log_level.lower(),
         loop="asyncio",
         access_log=False,
@@ -96,8 +106,7 @@ async def _run_webhook(stop_event: asyncio.Event) -> None:
 
     server_task = asyncio.create_task(server.serve())
     logger.success(
-        f"Webhook server listening on {settings.webhook_host}:{settings.webhook_port}"
-        f"{settings.webhook_path}"
+        f"Webhook server listening on {settings.webhook_host}:{port}{settings.webhook_path}"
     )
 
     await stop_event.wait()
@@ -136,11 +145,11 @@ async def amain() -> None:
     stop_event = asyncio.Event()
     _install_signal_handlers(stop_event)
 
-    bot_task = asyncio.create_task(_run_bot(stop_event), name="bot")
+    # Start HTTP first so Railway healthcheck (/healthz) passes quickly.
     webhook_task = asyncio.create_task(_run_webhook(stop_event), name="webhook")
+    bot_task = asyncio.create_task(_run_bot(stop_event), name="bot")
 
-    # Keep webhook alive even if Telegram is temporarily unreachable.
-    await asyncio.gather(bot_task, webhook_task, return_exceptions=True)
+    await asyncio.gather(webhook_task, bot_task, return_exceptions=True)
     logger.info("All components stopped. Bye!")
 
 
