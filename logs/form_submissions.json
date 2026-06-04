@@ -1,0 +1,38 @@
+[
+  {
+    "at": "2026-05-30T14:10:03.658796+00:00",
+    "form_type": "offboard",
+    "telegram_user_id": 6892727685,
+    "subject": "[Fusion Wealth] Offboard request \u2014 Gino Tummers Tummers",
+    "body": "Form type: Offboard request\nTelegram user ID: 6892727685\nTelegram name: Gino Tummers\nPlatform: Vantage\n\nfirst_name: Gino Tummers\nlast_name: Tummers\ntelegram_username: @I don\u2019t have one\ntrading_username: 123543\nemail: Gino.tummers@gmail.com\nphone: 123453\nreason: Test",
+    "email_sent": false,
+    "error": "(535, b'5.7.8 Username and Password not accepted. For more information, go to\\n5.7.8  https://support.google.com/mail/?p=BadCredentials 98e67ed59e1d1-36bc65e8490sm5550590a91.3 - gsmtp')"
+  },
+  {
+    "at": "2026-05-30T14:12:29.912570+00:00",
+    "form_type": "support",
+    "telegram_user_id": 6892727685,
+    "subject": "[Fusion Wealth] Support request \u2014 Gino Tummers",
+    "body": "Form type: Support request\nTelegram user ID: 6892727685\nTelegram name: Gino Tummers\n\nfirst_name: Gino\nlast_name: Tummers\ntelegram_username: @I don\u2019t have\ntrading_username: 23454\nemail: Test\nphone: Test\nconcern: Test",
+    "email_sent": false,
+    "error": "(535, b'5.7.8 Username and Password not accepted. For more information, go to\\n5.7.8  https://support.google.com/mail/?p=BadCredentials 41be03b00d2f7-c8580efbad6sm3192826a12.13 - gsmtp')"
+  },
+  {
+    "at": "2026-05-31T16:55:30.263856+00:00",
+    "form_type": "support",
+    "telegram_user_id": 6892727685,
+    "subject": "[Fusion Wealth] Support request \u2014 Gino Tummers",
+    "body": "Form type: Support request\nTelegram user ID: 6892727685\nTelegram name: Gino Tummers\n\nfirst_name: Gino\nlast_name: Tummers\ntelegram_username: @X\ntrading_username: X\nemail: X\nphone: X\nconcern: X",
+    "email_sent": false,
+    "error": "(535, b'5.7.8 Username and Password not accepted. For more information, go to\\n5.7.8  https://support.google.com/mail/?p=BadCredentials a640c23a62f3a-bed77673b4asm11237766b.40 - gsmtp')"
+  },
+  {
+    "at": "2026-06-01T17:19:02.171444+00:00",
+    "form_type": "support",
+    "telegram_user_id": 6892727685,
+    "subject": "[Fusion Wealth] Support request \u2014 Gino Tummers",
+    "body": "Form type: Support request\nTelegram user ID: 6892727685\nTelegram name: Gino Tummers\n\nfirst_name: Gino\nlast_name: Tummers\ntelegram_username: @ginotummers\ntrading_username: Test\nemail: Test@gmail.com\nphone: 1235678\nconcern: Test",
+    "email_sent": false,
+    "error": "(535, b'5.7.8 Username and Password not accepted. For more information, go to\\n5.7.8  https://support.google.com/mail/?p=BadCredentials a640c23a62f3a-bec5e5be0d4sm190494966b.52 - gsmtp')"
+  }
+]

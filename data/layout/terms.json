@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "message": "Please check our terms and disclaimer in the document below and click on accept to continue",
+  "btn_accept": "Accept",
+  "doc": {
+    "type": "file",
+    "path": "data/docs/terms_and_conditions.pdf",
+    "url": "https://drive.google.com/file/d/1emxNyLVx1PsQAIp7V0Gj7NNgDAIwnkD3/view?usp=sharing",
+    "caption": "Fusion Strategy — Terms & Disclaimer"
+  }
+}

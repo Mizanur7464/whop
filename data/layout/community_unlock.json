@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "unlock_after_welcome_onboarding": true,
+  "unlock_channels": [
+    "TELEGRAM_SIGNALS_CHANNEL_ID",
+    "TELEGRAM_EDUCATION_CHANNEL_ID",
+    "TELEGRAM_PNL_CHANNEL_ID",
+    "TELEGRAM_COPYTRADING_CHANNEL_ID",
+    "TELEGRAM_SUPPORT_CHANNEL_ID"
+  ]
+}
+

@@ -1,0 +1,41 @@
+{
+  "6892727685": {
+    "user_id": 6892727685,
+    "joined_at": "2026-06-04T03:24:48.415539+00:00",
+    "status": "active",
+    "plan": "unknown",
+    "checklist": {
+      "doc_followed": true,
+      "account_settings": true,
+      "deposit_100": true,
+      "return_continue": true
+    },
+    "username": "ginotummers",
+    "first_name": "Gino",
+    "last_name": "Tummers",
+    "language_code": "nl",
+    "updated_at": "2026-06-04T04:14:15.370013+00:00",
+    "onboarding_started_at": "2026-06-04T03:24:48.420548+00:00",
+    "location": "uae",
+    "platform": "Vantage",
+    "contact_email": "Gino.tummers@gmail.com",
+    "contact_telegram_id": 6892727685,
+    "telegram_username": "ginotummers",
+    "contact_phone": "1234678",
+    "terms_accepted_at": "2026-06-04T03:33:38.723128+00:00",
+    "terms_accepted": true,
+    "approval_status": "approved",
+    "screenshot_file_id": "AgACAgQAAxkBAAORaiDyHnPobTFG_rj44lZLaShlBioAAu4NaxuBCAhRe6NRk1bOiAYBAAMCAAN5AAM7BA",
+    "onboarding_completed_at": "2026-06-04T03:33:55.946681+00:00",
+    "onboarding_completed": true,
+    "copytrading_checklist": {
+      "doc_followed": true,
+      "account_settings": true,
+      "deposit_500": true,
+      "return_continue": true
+    },
+    "copytrading_completed": true,
+    "copytrading_platform": "Vantage",
+    "copytrading_completed_at": "2026-06-04T04:14:15.370013+00:00"
+  }
+}

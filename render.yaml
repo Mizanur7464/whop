@@ -1,0 +1,33 @@
+services:
+  - type: web
+    name: whop-telegram-bot
+    runtime: docker
+    plan: starter
+    dockerfilePath: ./Dockerfile
+    autoDeploy: true
+    healthCheckPath: /healthz
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: LOG_LEVEL
+        value: INFO
+      - key: WEBHOOK_HOST
+        value: 0.0.0.0
+      - key: WEBHOOK_PORT
+        value: "8000"
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_ADMIN_IDS
+        sync: false
+      - key: TELEGRAM_MAIN_GROUP_ID
+        sync: false
+      - key: WHOP_API_KEY
+        sync: false
+      - key: WHOP_WEBHOOK_SECRET
+        sync: false
+      - key: WHOP_COMPANY_ID
+        sync: false
+      - key: AIRTABLE_API_KEY
+        sync: false
+      - key: AIRTABLE_BASE_ID
+        sync: false

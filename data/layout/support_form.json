@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "welcome_message": "If you are in need of any support fill in the contact form and we will get back to you. Only fill in the support form if you have critical questions, if we feel the support ticket is not in critical need of a answer we will not respond to it. Click continue if you want to proceed",
+
+  "btn_continue": "Continue",
+
+  "form_intro": "Please answer the following questions. Send one message per answer.",
+
+  "form_questions": [
+    { "id": "first_name", "prompt": "What is your first name?" },
+    { "id": "last_name", "prompt": "What is your last name?" },
+    { "id": "telegram_username", "prompt": "What is your Telegram username? (e.g. @yourname)" },
+    { "id": "trading_username", "prompt": "What is your trading platform username?" },
+    { "id": "email", "prompt": "What is your email address?" },
+    { "id": "phone", "prompt": "What is your phone number?" },
+    { "id": "concern", "prompt": "What is your question or concern?" }
+  ],
+
+  "btn_submit": "Submit",
+
+  "submitted_message": "Thank you. We have received your support request. We will reach out to you within 3-5 working days if we feel the support ticket needs to be addressed."
+}

@@ -1,0 +1,64 @@
+{
+  "version": 3,
+  "reminder_hours": 24,
+  "max_reminders": 2,
+
+  "welcome_message": "Welcome to our Fusion Family. Please complete the following steps to get access to the full community.",
+
+  "location_message": "Where do you live? Select one option below.",
+
+  "contact_intro_message": "Before we continue, we need your contact details so our team can reach you if anything in your trading platform settings is incorrect.\n\nYour Telegram ID: `{telegram_id}`\nYour Telegram username: {telegram_username}\n\nIf these look wrong, update them in Telegram settings first, then continue.",
+
+  "contact_email_prompt": "Please reply with your *email address* in your next message.",
+
+  "contact_phone_prompt": "Thank you. Now please reply with your *phone number* (include country code, e.g. +31...).",
+
+  "contact_saved_message": "Contact details saved. Tap *Continue* to proceed.",
+
+  "checklist_intro": "Please go through the document, follow the steps, and fill in the checklist below when you are done.",
+
+  "checklist_items": [
+    {
+      "id": "doc_followed",
+      "title": "Go through the doc and follow the steps",
+      "description": "",
+      "self_mark": true
+    },
+    {
+      "id": "account_settings",
+      "title": "Set the correct settings in your account",
+      "description": "",
+      "self_mark": true
+    },
+    {
+      "id": "deposit_100",
+      "title": "Deposit at least $100 in your account",
+      "description": "",
+      "self_mark": true
+    },
+    {
+      "id": "return_continue",
+      "title": "When complete. Please click continue",
+      "description": "",
+      "self_mark": true
+    }
+  ],
+
+  "confirmation_warning_message": "Have you gone through the whole document and set everything up correctly?\n\nIf you did not, this can have a negative affect on your trading experience.",
+
+  "screenshot_request_message": "Please submit a screenshot showing you have linked your account to us.\n\nWe will manually check your screenshot and give you access to the rest of the community when we approve.",
+
+  "pending_review_message": "Thank you — we received your screenshot.\n\nOur team is reviewing it now. You will be given access within 24h. You will receive a notification when access has been granted.",
+
+  "approved_message": "You are approved. Welcome to Fusion Strategy — you now have access to the full community.",
+
+  "idle_after_complete_message": "You're all set — onboarding is complete. You have full access to the Fusion Strategy community.",
+
+  "rejected_message": "We could not approve this screenshot.\n\n{reason}\n\nPlease send a new screenshot when you are ready.",
+
+  "completion_message": "You are approved. Welcome to Fusion Strategy — you now have access to the full community.",
+
+  "btn_next": "Next",
+  "btn_continue": "Continue",
+  "btn_everything_set_up": "Everything is set up"
+}

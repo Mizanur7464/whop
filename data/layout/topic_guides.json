@@ -1,0 +1,7 @@
+{
+  "version": 2,
+  "welcome": "Welcome to Fusion Strategy.\n\nTo get started, please use the command /onboarding to unlock access to our full community and member resources. Make sure you type the command below in the chat and hit enter.\n\nYou'll shortly receive a message from our Fusion Bot, which will guide you through the onboarding process and help get everything set up.\n\nWe're excited to have you with us and look forward to supporting your trading journey.",
+  "copytrading": "Welcome to the Fusion Strategy Copy Trading Channel.\n\nThis automated process allows for you to copy our trades 1-1 automatically without pressing a button. Please use the command /copytrading to get started. Make sure you type the command below in the chat and hit enter.\n\nYou'll shortly receive a message from our Fusion Bot, which will guide you through the setup process and help get everything set up.",
+  "support": "Support\n\nThe contact form is private — only you and our team see your answers.\n\nType /support below and complete the form in a private chat with the bot.",
+  "education": "Members Community\n\nThis topic is for member discussion. Please keep conversations respectful and on topic.\n\nFor onboarding, copy trading setup, or support, use the other topics or message the bot in private chat."
+}

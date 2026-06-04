@@ -1,0 +1,59 @@
+{
+  "version": 2,
+  "welcome_message": "Welcome to the Fusion Strategy Copy Trading Channel.\n\nThis automated process allows for you to copy our trades 1-1 automatically without pressing a button.\n\nOur Fusion Bot, which will guide you through the onboarding process and help get everything set up. Click the button below and follow the steps.",
+
+  "btn_setup": "Set up copy trading",
+
+  "platform_prompt": "What platform are you using?",
+
+  "platforms": [
+    {
+      "id": "vantage",
+      "label": "Vantage",
+      "doc": {
+        "type": "file",
+        "path": "data/docs/vantage_copytrading.pdf",
+        "url": "https://drive.google.com/file/d/1x_jzPM8B5SDk-eCzR3QJL7NKAq_pNJ6x/view?usp=sharing",
+        "caption": "Vantage copy trading setup instructions"
+      }
+    },
+    {
+      "id": "premier",
+      "label": "Premier",
+      "doc": {
+        "type": "file",
+        "path": "data/docs/premier_copytrading.pdf",
+        "url": "https://drive.google.com/file/d/1l-akMVYoq56LqfE8tbO3vsyeMxcb8Lpw/view?usp=sharing",
+        "caption": "Premier copy trading setup instructions"
+      }
+    }
+  ],
+
+  "checklist_intro": "Please go through the document, follow the steps, and fill in the checklist below when you are done.",
+
+  "checklist_items": [
+    {
+      "id": "doc_followed",
+      "title": "Go through the doc and follow the steps"
+    },
+    {
+      "id": "account_settings",
+      "title": "Set the correct settings in your account"
+    },
+    {
+      "id": "deposit_500",
+      "title": "Deposit at least $500 in your account"
+    },
+    {
+      "id": "return_continue",
+      "title": "When complete. Please click continue"
+    }
+  ],
+
+  "confirmation_warning_message": "Have you gone through the whole document and set everything up correctly?\n\nIf you did not, this can have a negative affect on your trading experience.",
+
+  "success_message": "You are all set up. From this point, every trade that Fusion Strategy makes will be copied on your account automatically. You can pause copy trading anytime from your platform profile. Happy trading!",
+
+  "btn_continue": "Continue",
+  "btn_everything_set_up": "Everything is set up"
+}

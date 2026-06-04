@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "welcome_message": "If you want to opt out and detach yourself from us follow the steps in this channel. Click on offboard if you want to continue.",
+
+  "btn_offboard": "Offboard",
+
+  "platform_prompt": "What platform are you using?",
+
+  "after_doc_message": "Please go through the document and follow the steps. When you are done, click continue below.",
+
+  "btn_continue": "Continue",
+
+  "platforms": [
+    {
+      "id": "vantage",
+      "label": "Vantage",
+      "doc": {
+        "type": "file",
+        "path": "data/docs/vantage_offboard.pdf",
+        "caption": "Vantage offboard instructions"
+      }
+    },
+    {
+      "id": "premier",
+      "label": "Premier",
+      "doc": {
+        "type": "file",
+        "path": "data/docs/premier_offboard.pdf",
+        "caption": "Premier offboard instructions"
+      }
+    }
+  ],
+
+  "form_intro": "Please answer the following questions. Send one message per answer.",
+
+  "form_questions": [
+    { "id": "first_name", "prompt": "What is your first name?" },
+    { "id": "last_name", "prompt": "What is your last name?" },
+    { "id": "telegram_username", "prompt": "What is your Telegram username? (e.g. @yourname)" },
+    { "id": "trading_username", "prompt": "What is your trading platform username?" },
+    { "id": "email", "prompt": "What is your email address?" },
+    { "id": "phone", "prompt": "What is your phone number?" },
+    { "id": "reason", "prompt": "Why do you want to opt out?" }
+  ],
+
+  "btn_submit": "Submit",
+
+  "submitted_message": "Thank you. We have received your offboard request and will reach out to you within 3-5 working days."
+}
