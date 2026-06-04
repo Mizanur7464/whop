@@ -36,8 +36,10 @@ def claim_email_not_found() -> str:
     if is_free_access():
         return (
             "We could not find a registration for that email yet.\n\n"
-            "• Wait 30–60 seconds after signing up on Whop, then try again.\n"
-            "• Use the same email as on your Whop account.\n"
+            "• Finish the *free Whop* signup first (same link from the group).\n"
+            "• Wait 30–60 seconds, then try again.\n"
+            "• Use the *exact* email from Whop (check spelling).\n"
+            "• Or open the page after Whop — your *activation code* is there.\n"
             "• Still stuck? Tap /support."
         )
     return (

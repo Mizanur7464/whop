@@ -80,14 +80,33 @@ def _membership_id(entity: dict) -> str | None:
 
 def _checkout_email(entity: dict) -> str | None:
     """Email used on Whop checkout — used to auto-link via the Telegram bot."""
-    user = entity.get("user") or {}
-    for raw in (
+    user = entity.get("user") if isinstance(entity.get("user"), dict) else {}
+    billing = entity.get("billing") if isinstance(entity.get("billing"), dict) else {}
+    customer = entity.get("customer") if isinstance(entity.get("customer"), dict) else {}
+    member = entity.get("member") if isinstance(entity.get("member"), dict) else {}
+
+    candidates: list = [
         entity.get("email"),
         user.get("email"),
         entity.get("user_email"),
-    ):
+        billing.get("email"),
+        customer.get("email"),
+        member.get("email"),
+        (user.get("billing") or {}).get("email") if isinstance(user.get("billing"), dict) else None,
+    ]
+    for raw in candidates:
         if isinstance(raw, str) and "@" in raw:
             return raw.strip().lower()
+    return None
+
+
+def _checkout_email_from_payload(payload: dict) -> str | None:
+    """Try several payload layers — Whop event shape varies."""
+    for block in (_data(payload), payload.get("data"), payload):
+        if isinstance(block, dict):
+            found = _checkout_email(block)
+            if found:
+                return found
     return None
 
 
@@ -178,7 +197,7 @@ async def on_membership_valid(payload: dict) -> None:
 
     # Path B: no Telegram link yet — pending claim (email match or /claim code)
     code = secrets.token_urlsafe(6).replace("-", "").replace("_", "")[:8].upper()
-    checkout_email = _checkout_email(entity)
+    checkout_email = _checkout_email(entity) or _checkout_email_from_payload(payload)
     storage.add_pending_claim(
         claim_code=code,
         whop_user_id=whop_user,
@@ -187,6 +206,11 @@ async def on_membership_valid(payload: dict) -> None:
         plan=plan_name,
         email=checkout_email,
     )
+    if not checkout_email:
+        logger.warning(
+            f"Pending claim {code} has no email in webhook — "
+            "user should use /whop/success or /claim CODE"
+        )
     logger.info(
         f"Created pending claim {code} for whop_user={whop_user} "
         f"membership={membership_id} email={checkout_email or '—'}"
