@@ -1,16 +1,17 @@
 """
 /claim <code> — link a Telegram user to their Whop membership.
 
-Flow:
-    1. Customer pays on Whop.
-    2. Whop webhook fires `membership.went_valid`.
-    3. If no Telegram ID is known yet, a 8-char claim code is generated
-       and stored. The buyer should configure Whop's success page /
-       email to instruct the customer to DM the bot with `/claim CODE`.
-    4. Customer DMs the bot. This handler validates and grants access.
+After Whop payment (no Telegram on file yet):
+    1. Webhook stores a pending claim keyed by checkout email.
+    2. Customer sends /claim in the bot, then replies with checkout email.
+    3. Bot redeems automatically and DMs group invite links.
+
+/claim CODE still works as a fallback.
 """
 
 from __future__ import annotations
+
+import re
 
 from loguru import logger
 from telegram import Update
@@ -24,24 +25,104 @@ from bot.community_layout import FLOW_WELCOME
 from bot.decorators import is_admin, log_call
 from integrations import plan_mapping, telegram_ops
 
+USER_DATA_AWAITING_WHOP_EMAIL = "awaiting_whop_email"
 
-CLAIM_USAGE = (
-    "Usage: `/claim YOURCODE`\n\n"
-    "After paying on Whop, you should have received an 8-character claim "
-    "code via email or the confirmation page. Paste it here."
+CLAIM_EMAIL_PROMPT = (
+    "Thanks for your Whop payment.\n\n"
+    "Reply with the *email address* you used at checkout "
+    "(one message). We will link your membership and send your "
+    "Telegram group invite here.\n\n"
+    "Have an 8-character code instead? Send `/claim YOURCODE`."
+)
+
+EMAIL_NOT_FOUND = (
+    "We could not find a payment for that email yet.\n\n"
+    "• Wait 30–60 seconds after paying, then try again.\n"
+    "• Use the same email as on your Whop receipt.\n"
+    "• Still stuck? Tap /support."
 )
 
 CLAIM_NOT_FOUND = (
-    "We couldn't find that claim code. It may have already been used, "
-    "or it might be expired.\n\n"
-    "If you just paid, please wait 30 seconds and try again. "
-    "Still stuck? Tap /support."
+    "We couldn't find that claim code. It may have already been used.\n\n"
+    "Just paid? Send `/claim` and reply with your Whop checkout email."
 )
 
 CLAIM_SUCCESS = (
-    "✅ Your membership has been linked!\n\n"
-    "Check the DM I just sent you for your group invite links."
+    "Your membership is linked.\n\n"
+    "Check this chat for your group invite link(s). "
+    "Then send /onboarding to complete setup."
 )
+
+
+def _email_pattern(text: str) -> bool:
+    return bool(re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", text.strip()))
+
+
+def whop_email_activation_active(_: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    return bool(context.user_data.get(USER_DATA_AWAITING_WHOP_EMAIL))
+
+
+def begin_whop_email_activation(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    context.user_data[USER_DATA_AWAITING_WHOP_EMAIL] = True
+
+
+async def prompt_whop_activation(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    if not update.message:
+        return
+    begin_whop_email_activation(update, context)
+    await update.message.reply_text(
+        CLAIM_EMAIL_PROMPT, parse_mode=ParseMode.MARKDOWN
+    )
+
+
+async def fulfill_claim(
+    *,
+    telegram_user_id: int,
+    username: str | None,
+    first_name: str | None,
+    last_name: str | None,
+    code: str,
+    claim: dict,
+) -> dict:
+    """Link Whop membership and grant Telegram group access."""
+    whop_user_id = claim["whop_user_id"]
+    product_id = claim.get("product_id")
+    plan_name = plan_mapping.resolve_plan_name(product_id)
+    chats = plan_mapping.resolve_chats_for_product(product_id)
+
+    storage.link_whop_user(
+        telegram_user_id,
+        whop_user_id,
+        whop_membership_id=claim["whop_membership_id"],
+        plan=plan_name,
+        status="active",
+        username=username or "",
+        first_name=first_name or "",
+        last_name=last_name or "",
+    )
+
+    logger.info(
+        f"Claim {code} linked tg={telegram_user_id} (@{username}) "
+        f"-> whop={whop_user_id} membership={claim['whop_membership_id']}"
+    )
+
+    await airtable_sync.member_joined(
+        telegram_user_id=telegram_user_id,
+        telegram_username=username,
+        name=" ".join(p for p in [first_name, last_name] if p) or None,
+        whop_user_id=whop_user_id,
+        whop_membership_id=claim["whop_membership_id"],
+        plan=plan_name,
+    )
+
+    result = await telegram_ops.grant_access(
+        telegram_user_id, chats, plan_name=plan_name
+    )
+    return {"plan_name": plan_name, "grant": result}
 
 
 @log_call
@@ -54,11 +135,10 @@ async def cmd_claim(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
 
     if not context.args:
-        await update.message.reply_text(
-            CLAIM_USAGE, parse_mode=ParseMode.MARKDOWN
-        )
+        await prompt_whop_activation(update, context)
         return
 
+    context.user_data.pop(USER_DATA_AWAITING_WHOP_EMAIL, None)
     code = context.args[0].strip().upper()
     claim = storage.pop_pending_claim(code)
 
@@ -70,46 +150,72 @@ async def cmd_claim(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         )
         return
 
-    whop_user_id = claim["whop_user_id"]
-    product_id = claim.get("product_id")
-    plan_name = plan_mapping.resolve_plan_name(product_id)
-    chats = plan_mapping.resolve_chats_for_product(product_id)
+    await update.message.reply_text(CLAIM_SUCCESS, parse_mode=ParseMode.MARKDOWN)
 
-    storage.link_whop_user(
-        user.id,
-        whop_user_id,
-        whop_membership_id=claim["whop_membership_id"],
-        plan=plan_name,
-        status="active",
-        username=user.username or "",
-        first_name=user.first_name or "",
-        last_name=user.last_name or "",
-    )
-
-    logger.info(
-        f"Claim {code} linked tg={user.id} (@{user.username}) "
-        f"-> whop={whop_user_id} membership={claim['whop_membership_id']}"
-    )
-
-    await airtable_sync.member_joined(
+    outcome = await fulfill_claim(
         telegram_user_id=user.id,
-        telegram_username=user.username,
-        name=" ".join(p for p in [user.first_name, user.last_name] if p) or None,
-        whop_user_id=whop_user_id,
-        whop_membership_id=claim["whop_membership_id"],
-        plan=plan_name,
+        username=user.username,
+        first_name=user.first_name,
+        last_name=user.last_name,
+        code=code,
+        claim=claim,
     )
-
-    await update.message.reply_text(
-        CLAIM_SUCCESS,
-        parse_mode=ParseMode.MARKDOWN,
-    )
-
-    result = await telegram_ops.grant_access(user.id, chats, plan_name=plan_name)
-    if not result["sent"]:
+    if not outcome["grant"]["sent"]:
         await update.message.reply_text(
             "I couldn't DM you the invite links. Please tap /start once, "
-            "then run /claim again.",
+            "then send `/claim` again or `/claim` with your code.",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+
+    jobs.schedule_onboarding_reminder(context.application, user.id)
+
+
+@log_call
+async def on_whop_email_text(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    """Redeem pending Whop payment by matching checkout email."""
+    if not update.message or not update.effective_user:
+        return
+
+    text = (update.message.text or "").strip()
+    if not _email_pattern(text):
+        await update.message.reply_text(
+            "Please send a valid email address (the one you used on Whop).",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+        return
+
+    user = update.effective_user
+    found = storage.find_pending_claim_by_email(text)
+    if not found:
+        await update.message.reply_text(
+            EMAIL_NOT_FOUND,
+            reply_markup=keyboards.back_only(),
+            parse_mode=ParseMode.MARKDOWN,
+        )
+        return
+
+    code, claim = found
+    claim = storage.pop_pending_claim(code)
+    if not claim:
+        await update.message.reply_text(EMAIL_NOT_FOUND, parse_mode=ParseMode.MARKDOWN)
+        return
+
+    context.user_data.pop(USER_DATA_AWAITING_WHOP_EMAIL, None)
+    await update.message.reply_text(CLAIM_SUCCESS, parse_mode=ParseMode.MARKDOWN)
+
+    outcome = await fulfill_claim(
+        telegram_user_id=user.id,
+        username=user.username,
+        first_name=user.first_name,
+        last_name=user.last_name,
+        code=code,
+        claim=claim,
+    )
+    if not outcome["grant"]["sent"]:
+        await update.message.reply_text(
+            "Membership linked, but invite links failed. Tap /start and contact /support.",
             parse_mode=ParseMode.MARKDOWN,
         )
 
@@ -132,8 +238,9 @@ async def cmd_pending_claims(update: Update, _: ContextTypes.DEFAULT_TYPE) -> No
 
     lines = ["*Pending Claims*", ""]
     for code, data in items[-20:]:
+        email = data.get("email") or "—"
         lines.append(
             f"`{code}` → whop_user `{data.get('whop_user_id')}` "
-            f"({data.get('plan', 'unknown')})"
+            f"email `{email}` ({data.get('plan', 'unknown')})"
         )
     await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN)

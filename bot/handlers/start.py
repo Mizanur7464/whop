@@ -11,7 +11,7 @@ from bot.access import idle_after_complete_message, shows_main_menu
 from bot.channel_context import ensure_welcome_context
 from bot.command_registry import refresh_chat_commands
 from bot.decorators import is_admin, log_call
-from bot.handlers import copy_trading, onboarding, support_channel
+from bot.handlers import claim, copy_trading, onboarding, support_channel
 
 
 @log_call
@@ -39,6 +39,11 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     )
 
     payload = (context.args[0].lower() if context.args else "").strip()
+
+    if payload in ("paid", "whop", "activate", "claim"):
+        if chat and chat.type == "private":
+            await claim.prompt_whop_activation(update, context)
+        return
 
     if payload in ("copytrading", "copy_trading"):
         await copy_trading.cmd_copytrading(update, context)

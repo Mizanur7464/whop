@@ -24,6 +24,7 @@ from loguru import logger
 
 from airtable import sync as airtable_sync
 from bot import storage
+from config import settings
 from integrations import plan_mapping, telegram_ops
 
 Handler = Callable[[dict], Awaitable[None]]
@@ -74,6 +75,19 @@ def _product_id(entity: dict) -> str | None:
 
 def _membership_id(entity: dict) -> str | None:
     return entity.get("id") or entity.get("membership_id")
+
+
+def _checkout_email(entity: dict) -> str | None:
+    """Email used on Whop checkout — used to auto-link via the Telegram bot."""
+    user = entity.get("user") or {}
+    for raw in (
+        entity.get("email"),
+        user.get("email"),
+        entity.get("user_email"),
+    ):
+        if isinstance(raw, str) and "@" in raw:
+            return raw.strip().lower()
+    return None
 
 
 def _telegram_hint(entity: dict) -> tuple[str | None, int | None]:
@@ -161,21 +175,43 @@ async def on_membership_valid(payload: dict) -> None:
         )
         return
 
-    # Path B: no Telegram link yet — issue a claim code
+    # Path B: no Telegram link yet — pending claim (email match or /claim code)
     code = secrets.token_urlsafe(6).replace("-", "").replace("_", "")[:8].upper()
+    checkout_email = _checkout_email(entity)
     storage.add_pending_claim(
         claim_code=code,
         whop_user_id=whop_user,
         whop_membership_id=membership_id,
         product_id=product_id,
         plan=plan_name,
+        email=checkout_email,
     )
     logger.info(
-        f"Created pending claim {code} for whop_user={whop_user} membership={membership_id}"
+        f"Created pending claim {code} for whop_user={whop_user} "
+        f"membership={membership_id} email={checkout_email or '—'}"
     )
-    # The buyer's Whop receipt/email should instruct the customer to
-    # DM the bot with `/claim {code}` — we send that template via Whop's
-    # email customization (out of scope for the bot).
+
+    bot_username = (settings.telegram_bot_username or "").lstrip("@")
+    bot_link = f"https://t.me/{bot_username}" if bot_username else "our Telegram bot"
+    dm_lines = [
+        "Your Whop payment was received.",
+        "",
+        "To get your Telegram group invite:",
+        f"1. Open {bot_link}",
+        "2. Send `/claim`",
+        "3. Reply with the *email* you used on Whop (one message).",
+        "",
+        "Your invite link will appear here automatically.",
+    ]
+    if checkout_email:
+        dm_lines.insert(
+            2,
+            f"(We have `{checkout_email}` on file — use that exact address.)",
+        )
+
+    _, hint_id = _telegram_hint(entity)
+    if hint_id:
+        await telegram_ops.dm(hint_id, "\n".join(dm_lines))
 
 
 async def on_membership_invalid(payload: dict) -> None:

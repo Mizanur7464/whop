@@ -356,3 +356,23 @@ def find_pending_claim_by_whop_user(whop_user_id: str) -> Optional[tuple[str, di
         return None
     candidates.sort(key=lambda kv: kv[1].get("created_at", ""), reverse=True)
     return candidates[0]
+
+
+def _normalize_email(email: str) -> str:
+    return email.strip().lower()
+
+
+def find_pending_claim_by_email(email: str) -> Optional[tuple[str, dict]]:
+    """Match Whop checkout email to a pending claim (newest first)."""
+    target = _normalize_email(email)
+    if not target or "@" not in target:
+        return None
+    candidates = [
+        (code, data)
+        for code, data in _pending_claims.items()
+        if _normalize_email(data.get("email") or "") == target
+    ]
+    if not candidates:
+        return None
+    candidates.sort(key=lambda kv: kv[1].get("created_at", ""), reverse=True)
+    return candidates[0]
