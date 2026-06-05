@@ -24,7 +24,7 @@ import json
 from typing import Any
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Header, Query, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 from loguru import logger
 
 from config import settings
@@ -44,6 +44,28 @@ def create_app() -> FastAPI:
         docs_url=None,
         redoc_url=None,
     )
+
+    @app.middleware("http")
+    async def log_http_requests(request: Request, call_next):
+        path = request.url.path
+        if path.startswith(("/whop/", "/api/claim/", settings.webhook_path)):
+            qs = dict(request.query_params)
+            logger.info(f"HTTP {request.method} {path} query={qs}")
+        try:
+            response = await call_next(request)
+            if path.startswith(("/whop/", "/api/claim/")):
+                logger.info(f"HTTP {request.method} {path} -> {response.status_code}")
+            return response
+        except Exception as e:
+            logger.exception(f"HTTP 500 {request.method} {path}: {e}")
+            raise
+
+    @app.exception_handler(Exception)
+    async def unhandled_exception(request: Request, exc: Exception) -> PlainTextResponse:
+        logger.exception(
+            f"Unhandled error on {request.method} {request.url.path}: {exc}"
+        )
+        return PlainTextResponse("Internal Server Error", status_code=500)
 
     @app.get("/")
     async def health() -> dict:
@@ -100,7 +122,14 @@ def create_app() -> FastAPI:
     async def whop_success_page(request: Request) -> HTMLResponse:
         """Buyer redirect target after Whop checkout."""
         params = {k: v for k, v in request.query_params.items() if v}
-        return HTMLResponse(render_success_html(params))
+        logger.info(f"success_page: GET {SUCCESS_PATH} params={params}")
+        try:
+            html = render_success_html(params)
+        except Exception as e:
+            logger.exception(f"success_page: render failed: {e}")
+            raise
+        logger.success(f"success_page: rendered OK ({len(html)} bytes)")
+        return HTMLResponse(html)
 
     @app.get(STATUS_PATH)
     async def claim_status(
@@ -109,11 +138,17 @@ def create_app() -> FastAPI:
         id: str | None = Query(default=None),
         code: str | None = Query(default=None),
         email: str | None = Query(default=None),
+        receipt_id: str | None = Query(default=None),
+        payment_id: str | None = Query(default=None),
     ) -> JSONResponse:
         """Poll until webhook has created a pending claim."""
         mid = membership_id or membership or id
         payload = await lookup_claim_status_async(
-            membership_id=mid, code=code, email=email
+            membership_id=mid,
+            code=code,
+            email=email,
+            receipt_id=receipt_id,
+            payment_id=payment_id,
         )
         return JSONResponse(payload)
 

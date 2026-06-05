@@ -10,9 +10,13 @@ Whop may pass different query names; the page forwards all query params to
 
 from __future__ import annotations
 
+import json
+import re
 from html import escape
 from typing import Any
 from urllib.parse import urlencode, urlparse
+
+from loguru import logger
 
 from config import settings
 from integrations.whop_copy import (
@@ -29,6 +33,37 @@ from integrations.whop_success_invites import ensure_pending_claim_invite_links
 
 SUCCESS_PATH = "/whop/success"
 STATUS_PATH = "/api/claim/status"
+
+_PLACEHOLDER_RE = re.compile(r"^\{.+\}$")
+
+
+def _is_unresolved_whop_placeholder(value: str | None) -> bool:
+    """Whop sometimes sends literal `{membership_id}` when the variable is wrong."""
+    if not value:
+        return False
+    v = value.strip()
+    return bool(_PLACEHOLDER_RE.match(v)) or v in (
+        "{membership_id}",
+        "{id}",
+        "membership_id",
+    )
+
+
+def normalize_success_query(query: dict[str, str]) -> dict[str, str]:
+    """Clean Whop redirect query params and log what we received."""
+    out = {k: v for k, v in query.items() if v}
+    mid = out.get("membership_id") or out.get("membership") or out.get("id")
+    if _is_unresolved_whop_placeholder(mid):
+        logger.warning(
+            f"success_page: unresolved Whop placeholder membership_id={mid!r} — "
+            "fix Redirect URL in Whop (use Whop's real variable, not literal braces). "
+            f"other_params={list(k for k in out if k not in ('membership_id',))}"
+        )
+        for key in ("membership_id", "membership", "id"):
+            if out.get(key) and _is_unresolved_whop_placeholder(out.get(key)):
+                out.pop(key, None)
+    logger.info(f"success_page: query keys={list(out.keys())} membership_id={out.get('membership_id', '—')}")
+    return out
 
 
 def public_app_base_url() -> str:
@@ -63,12 +98,17 @@ def _find_pending_claim(
     membership_id: str | None = None,
     code: str | None = None,
     email: str | None = None,
+    receipt_id: str | None = None,
+    payment_id: str | None = None,
 ) -> tuple[str, dict] | None:
     from bot import storage
 
     found: tuple[str, dict] | None = None
-    if membership_id:
+    if membership_id and not _is_unresolved_whop_placeholder(membership_id):
         found = storage.find_pending_claim_by_membership_id(membership_id)
+    pay_ref = (payment_id or receipt_id or "").strip()
+    if not found and pay_ref:
+        found = storage.find_pending_claim_by_payment_id(pay_ref)
     if not found and code:
         found = storage.find_pending_claim_by_code(code.strip().upper())
     if not found and email:
@@ -81,12 +121,18 @@ def lookup_claim_status(
     membership_id: str | None = None,
     code: str | None = None,
     email: str | None = None,
+    receipt_id: str | None = None,
+    payment_id: str | None = None,
 ) -> dict[str, Any]:
     """Sync peek (no invite generation). Prefer lookup_claim_status_async."""
     bot_url = telegram_bot_url()
     claim_link = telegram_claim_deep_link()
     found = _find_pending_claim(
-        membership_id=membership_id, code=code, email=email
+        membership_id=membership_id,
+        code=code,
+        email=email,
+        receipt_id=receipt_id,
+        payment_id=payment_id,
     )
     if not found:
         return {
@@ -115,30 +161,66 @@ async def lookup_claim_status_async(
     membership_id: str | None = None,
     code: str | None = None,
     email: str | None = None,
+    receipt_id: str | None = None,
+    payment_id: str | None = None,
 ) -> dict[str, Any]:
     """Poll endpoint: ensures Telegram invite links exist when claim is ready."""
+    if _is_unresolved_whop_placeholder(membership_id):
+        membership_id = None
+
+    logger.info(
+        f"success_page/status: membership_id={membership_id!r} code={code!r} "
+        f"email={email!r} receipt_id={receipt_id!r} payment_id={payment_id!r}"
+    )
+
     payload = lookup_claim_status(
-        membership_id=membership_id, code=code, email=email
+        membership_id=membership_id,
+        code=code,
+        email=email,
+        receipt_id=receipt_id,
+        payment_id=payment_id,
     )
     if not payload.get("ready"):
+        logger.warning(
+            "success_page/status: no pending claim yet "
+            f"(membership_id={membership_id!r} payment_id={payment_id!r} "
+            f"receipt_id={receipt_id!r}) — webhook may still be processing"
+        )
         return payload
 
     found = _find_pending_claim(
-        membership_id=membership_id, code=code, email=email
+        membership_id=membership_id,
+        code=code,
+        email=email,
+        receipt_id=receipt_id,
+        payment_id=payment_id,
     )
     if not found:
         return payload
 
     claim_code, data = found
-    invite_links = await ensure_pending_claim_invite_links(claim_code, data)
+    logger.info(
+        f"success_page/status: found claim code={claim_code} "
+        f"membership={data.get('whop_membership_id')} email={data.get('email')}"
+    )
+    try:
+        invite_links = await ensure_pending_claim_invite_links(claim_code, data)
+    except Exception as e:
+        logger.exception(f"success_page/status: invite generation failed: {e}")
+        invite_links = []
     primary = invite_links[0]["url"] if invite_links else None
     payload["invite_links"] = invite_links
     payload["primary_invite_url"] = primary
+    logger.info(
+        f"success_page/status: ready code={claim_code} invites={len(invite_links)} "
+        f"primary={'yes' if primary else 'no'}"
+    )
     return payload
 
 
 def render_success_html(query_params: dict[str, str]) -> str:
     """Self-contained success page with polling until webhook creates a claim."""
+    query_params = normalize_success_query(query_params)
     qs = urlencode({k: v for k, v in query_params.items() if v})
     status_url = f"{STATUS_PATH}?{qs}" if qs else STATUS_PATH
     bot_url = escape(telegram_bot_url() or "#")

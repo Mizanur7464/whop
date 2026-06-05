@@ -415,6 +415,34 @@ def find_pending_claim_by_email(email: str) -> Optional[tuple[str, dict]]:
     return candidates[0]
 
 
+def find_pending_claim_by_payment_id(
+    payment_ref: str,
+) -> Optional[tuple[str, dict]]:
+    """Match Whop redirect receipt_id / payment_id to a pending claim."""
+    ref = (payment_ref or "").strip()
+    if not ref:
+        return None
+    candidates = [
+        (code, data)
+        for code, data in _pending_claims.items()
+        if ref
+        in (
+            (data.get("payment_id") or ""),
+            (data.get("receipt_id") or ""),
+        )
+    ]
+    if not candidates:
+        logger.warning(f"storage: no pending claim for payment_ref={ref!r}")
+        return None
+    candidates.sort(key=lambda kv: kv[1].get("created_at", ""), reverse=True)
+    code, data = candidates[0]
+    logger.info(
+        f"storage: pending claim by payment_ref={ref!r} code={code} "
+        f"membership={data.get('whop_membership_id')}"
+    )
+    return code, data
+
+
 def find_pending_claim_by_membership_id(
     membership_id: str,
 ) -> Optional[tuple[str, dict]]:

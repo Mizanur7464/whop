@@ -49,7 +49,7 @@ async def _shutdown_bot(app) -> None:
 
 
 async def _run_bot(stop_event: asyncio.Event) -> None:
-    """Connect to Telegram with retries (network timeouts are common locally)."""
+    """Connect to Telegram with retries (network timeouts are common locally)"""
     delay_sec = 5
     attempt = 0
     while not stop_event.is_set():
@@ -100,7 +100,7 @@ async def _run_webhook(stop_event: asyncio.Event) -> None:
         port=port,
         log_level=settings.log_level.lower(),
         loop="asyncio",
-        access_log=False,
+        access_log=True,
     )
     server = uvicorn.Server(config)
 

@@ -78,6 +78,26 @@ def _membership_id(entity: dict) -> str | None:
     return entity.get("id") or entity.get("membership_id")
 
 
+def _payment_ref(entity: dict, payload: dict | None = None) -> str | None:
+    """Whop payment / receipt id (pay_...) for success-page redirect lookup."""
+    payment = entity.get("payment") if isinstance(entity.get("payment"), dict) else {}
+    blocks = [entity, payment]
+    if isinstance(payload, dict):
+        blocks.append(payload)
+        pdata = payload.get("data")
+        if isinstance(pdata, dict):
+            blocks.append(pdata)
+
+    for block in blocks:
+        if not isinstance(block, dict):
+            continue
+        for key in ("payment_id", "receipt_id", "id"):
+            raw = block.get(key)
+            if isinstance(raw, str) and raw.startswith("pay_"):
+                return raw.strip()
+    return None
+
+
 def _checkout_email(entity: dict) -> str | None:
     """Email used on Whop checkout — used to auto-link via the Telegram bot."""
     user = entity.get("user") if isinstance(entity.get("user"), dict) else {}
@@ -198,6 +218,7 @@ async def on_membership_valid(payload: dict) -> None:
     # Path B: no Telegram link yet — pending claim (email match or /claim code)
     code = secrets.token_urlsafe(6).replace("-", "").replace("_", "")[:8].upper()
     checkout_email = _checkout_email(entity) or _checkout_email_from_payload(payload)
+    payment_ref = _payment_ref(entity, payload)
     storage.add_pending_claim(
         claim_code=code,
         whop_user_id=whop_user,
@@ -205,6 +226,8 @@ async def on_membership_valid(payload: dict) -> None:
         product_id=product_id,
         plan=plan_name,
         email=checkout_email,
+        payment_id=payment_ref,
+        receipt_id=payment_ref,
     )
     from integrations.whop_success_invites import ensure_pending_claim_invite_links
 
