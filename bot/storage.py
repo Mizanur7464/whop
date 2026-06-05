@@ -315,6 +315,21 @@ def has_whop_link(telegram_user_id: int) -> bool:
     return bool(whop_id and str(whop_id).strip())
 
 
+def set_awaiting_claim_email(telegram_user_id: int, awaiting: bool = True) -> None:
+    """Persist claim-email step (survives bot restarts; not only context.user_data)."""
+    upsert_user(telegram_user_id, awaiting_claim_email=bool(awaiting))
+
+
+def is_awaiting_claim_email(telegram_user_id: int) -> bool:
+    user = get_user(telegram_user_id)
+    return bool(user and user.get("awaiting_claim_email"))
+
+
+def clear_awaiting_claim_email(telegram_user_id: int) -> None:
+    if is_awaiting_claim_email(telegram_user_id):
+        upsert_user(telegram_user_id, awaiting_claim_email=False)
+
+
 def get_telegram_id_for_whop_user(whop_user_id: str) -> Optional[int]:
     return _whop_to_tg.get(whop_user_id)
 

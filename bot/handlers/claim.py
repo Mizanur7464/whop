@@ -11,6 +11,7 @@ After Whop payment (no Telegram on file yet):
 
 from __future__ import annotations
 
+import asyncio
 import re
 
 from loguru import logger
@@ -40,12 +41,31 @@ from integrations.whop_copy import (
 USER_DATA_AWAITING_WHOP_EMAIL = "awaiting_whop_email"
 
 
-def _email_pattern(text: str) -> bool:
+def looks_like_claim_email(text: str) -> bool:
     return bool(re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", text.strip()))
 
 
-def whop_email_activation_active(_: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
-    return bool(context.user_data.get(USER_DATA_AWAITING_WHOP_EMAIL))
+def whop_email_activation_active(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> bool:
+    if context.user_data.get(USER_DATA_AWAITING_WHOP_EMAIL):
+        return True
+    user = update.effective_user
+    return bool(user and storage.is_awaiting_claim_email(user.id))
+
+
+def should_handle_whop_email_text(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> bool:
+    """Route private text to claim/email flow (memory flag or unlinked user email)."""
+    if not update.message or not update.effective_user:
+        return False
+    if whop_email_activation_active(update, context):
+        return True
+    user = update.effective_user
+    if is_admin(user.id) or storage.has_whop_link(user.id):
+        return False
+    return looks_like_claim_email((update.message.text or "").strip())
 
 
 async def reply_if_already_linked(
@@ -61,6 +81,7 @@ async def reply_if_already_linked(
     if not update.message:
         return True
     context.user_data.pop(USER_DATA_AWAITING_WHOP_EMAIL, None)
+    storage.clear_awaiting_claim_email(telegram_user_id)
     logger.info(f"claim: already linked tg={telegram_user_id}")
     await update.message.reply_text(
         claim_already_linked(),
@@ -74,6 +95,9 @@ def begin_whop_email_activation(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> None:
     context.user_data[USER_DATA_AWAITING_WHOP_EMAIL] = True
+    user = update.effective_user
+    if user:
+        storage.set_awaiting_claim_email(user.id, True)
 
 
 async def prompt_whop_activation(
@@ -97,6 +121,7 @@ async def fulfill_claim(
     last_name: str | None,
     code: str,
     claim: dict,
+    bot=None,
 ) -> dict:
     """Link Whop membership and grant Telegram group access."""
     whop_user_id = claim["whop_user_id"]
@@ -104,6 +129,7 @@ async def fulfill_claim(
     plan_name = plan_mapping.resolve_plan_name(product_id)
     chats = plan_mapping.resolve_chats_for_product(product_id)
 
+    storage.clear_awaiting_claim_email(telegram_user_id)
     storage.link_whop_user(
         telegram_user_id,
         whop_user_id,
@@ -120,16 +146,31 @@ async def fulfill_claim(
         f"-> whop={whop_user_id} membership={claim['whop_membership_id']}"
     )
 
-    invite_url = await telegram_ops.create_main_group_invite(
-        name=f"claim-{code}-{telegram_user_id}"
-    )
+    invite_url: str | None = None
+    try:
+        invite_url = await asyncio.wait_for(
+            telegram_ops.create_main_group_invite(
+                name=f"claim-{code}-{telegram_user_id}"
+            ),
+            timeout=20.0,
+        )
+    except asyncio.TimeoutError:
+        logger.error(
+            f"fulfill_claim: invite link timed out for tg={telegram_user_id}"
+        )
     if not invite_url and chats:
         logger.warning(
             f"fulfill_claim: main invite failed, trying plan chats for tg={telegram_user_id}"
         )
-        links = await telegram_ops.build_invite_link_list(chats, plan_name=plan_name)
-        if links:
-            invite_url = links[0].get("url")
+        try:
+            links = await asyncio.wait_for(
+                telegram_ops.build_invite_link_list(chats, plan_name=plan_name),
+                timeout=20.0,
+            )
+            if links:
+                invite_url = links[0].get("url")
+        except asyncio.TimeoutError:
+            logger.error(f"fulfill_claim: fallback invite timed out tg={telegram_user_id}")
 
     result = {
         "sent": bool(invite_url),
@@ -138,23 +179,30 @@ async def fulfill_claim(
         else {},
         "invite_url": invite_url,
     }
-    try:
-        await airtable_sync.member_joined(
-            telegram_user_id=telegram_user_id,
-            telegram_username=username,
-            name=" ".join(p for p in [first_name, last_name] if p) or None,
-            whop_user_id=whop_user_id,
-            whop_membership_id=claim["whop_membership_id"],
-            plan=plan_name,
-        )
-    except Exception as e:
-        logger.warning(f"fulfill_claim: Airtable sync failed for tg={telegram_user_id}: {e}")
-    try:
-        await refresh_commands_for_user(
-            telegram_ops.bot(), telegram_user_id
-        )
-    except Exception as e:
-        logger.warning(f"fulfill_claim: refresh commands failed for tg={telegram_user_id}: {e}")
+
+    async def _deferred_sync() -> None:
+        try:
+            await airtable_sync.member_joined(
+                telegram_user_id=telegram_user_id,
+                telegram_username=username,
+                name=" ".join(p for p in [first_name, last_name] if p) or None,
+                whop_user_id=whop_user_id,
+                whop_membership_id=claim["whop_membership_id"],
+                plan=plan_name,
+            )
+        except Exception as e:
+            logger.warning(
+                f"fulfill_claim: Airtable sync failed for tg={telegram_user_id}: {e}"
+            )
+        if bot is not None:
+            try:
+                await refresh_commands_for_user(bot, telegram_user_id)
+            except Exception as e:
+                logger.warning(
+                    f"fulfill_claim: refresh commands failed for tg={telegram_user_id}: {e}"
+                )
+
+    asyncio.create_task(_deferred_sync())
     return {"plan_name": plan_name, "grant": result, "invite_url": invite_url}
 
 
@@ -164,9 +212,12 @@ async def _send_claim_outcome_messages(
     """Post success + invite link in the same private chat (not a separate DM)."""
     if not update.message:
         return
-    await update.message.reply_text(
-        claim_success_message(), parse_mode=ParseMode.MARKDOWN
-    )
+    try:
+        await update.message.reply_text(
+            claim_success_message(), parse_mode=ParseMode.MARKDOWN
+        )
+    except Exception:
+        await update.message.reply_text(claim_success_message(), parse_mode=None)
     invite_url = outcome.get("invite_url") or outcome.get("grant", {}).get("invite_url")
     if invite_url:
         await update.message.reply_text(
@@ -202,6 +253,7 @@ async def cmd_claim(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     context.user_data.pop(USER_DATA_AWAITING_WHOP_EMAIL, None)
+    storage.clear_awaiting_claim_email(user.id)
     code = context.args[0].strip().upper()
     claim = storage.pop_pending_claim(code)
 
@@ -220,6 +272,7 @@ async def cmd_claim(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         last_name=user.last_name,
         code=code,
         claim=claim,
+        bot=context.bot,
     )
     await _send_claim_outcome_messages(update, outcome)
 
@@ -235,64 +288,88 @@ async def on_whop_email_text(
         return
 
     user = update.effective_user
-    if await reply_if_already_linked(update, context, user.id):
-        return
-
-    text = (update.message.text or "").strip()
-    if not _email_pattern(text):
-        await update.message.reply_text(
-            "Please send a valid email address (the one you used on Whop).",
-            parse_mode=ParseMode.MARKDOWN,
-        )
-        return
-
-    logger.info(
-        f"claim/email: tg={user.id} @{user.username} submitted email={text!r} | "
-        f"{storage.pending_claims_debug_summary()}"
-    )
-
-    found = storage.find_pending_claim_by_email(text)
-    if found:
-        code, claim = found
-        claim = storage.pop_pending_claim(code)
-        if not claim:
-            logger.error(f"claim/email: pop_pending_claim failed for code={code}")
-            await update.message.reply_text(
-                claim_email_not_found(), parse_mode=ParseMode.MARKDOWN
-            )
+    try:
+        if await reply_if_already_linked(update, context, user.id):
             return
-        logger.info(f"claim/email: redeemed local pending code={code}")
-    else:
-        logger.warning("claim/email: no local pending — trying Whop API fallback")
-        resolved = await fetch_membership_by_email(text)
-        if not resolved or not resolved.get("whop_user_id"):
-            logger.error(f"claim/email: Whop API also found nothing for {text!r}")
+
+        text = (update.message.text or "").strip()
+        if not looks_like_claim_email(text):
             await update.message.reply_text(
-                claim_email_not_found(),
-                reply_markup=keyboards.back_only(),
+                "Please send a valid email address (the one you used on Whop).",
                 parse_mode=ParseMode.MARKDOWN,
             )
             return
-        code = new_claim_code()
-        claim = resolved
-        logger.info(
-            f"claim/email: Whop API resolved membership={claim.get('whop_membership_id')} "
-            f"synthetic_code={code}"
+
+        await update.message.reply_text(
+            "One moment — linking your Whop registration…",
+            parse_mode=ParseMode.MARKDOWN,
         )
 
-    context.user_data.pop(USER_DATA_AWAITING_WHOP_EMAIL, None)
+        logger.info(
+            f"claim/email: tg={user.id} @{user.username} submitted email={text!r} | "
+            f"{storage.pending_claims_debug_summary()}"
+        )
 
-    outcome = await fulfill_claim(
-        telegram_user_id=user.id,
-        username=user.username,
-        first_name=user.first_name,
-        last_name=user.last_name,
-        code=code,
-        claim=claim,
-    )
-    await _send_claim_outcome_messages(update, outcome)
+        found = storage.find_pending_claim_by_email(text)
+        if found:
+            code, claim = found
+            claim = storage.pop_pending_claim(code)
+            if not claim:
+                logger.error(f"claim/email: pop_pending_claim failed for code={code}")
+                await update.message.reply_text(
+                    claim_email_not_found(), parse_mode=ParseMode.MARKDOWN
+                )
+                return
+            logger.info(f"claim/email: redeemed local pending code={code}")
+        else:
+            logger.warning("claim/email: no local pending — trying Whop API fallback")
+            try:
+                resolved = await asyncio.wait_for(
+                    fetch_membership_by_email(text),
+                    timeout=25.0,
+                )
+            except asyncio.TimeoutError:
+                logger.error(f"claim/email: Whop API lookup timed out for {text!r}")
+                await update.message.reply_text(
+                    "Whop lookup timed out. Please try again in 30 seconds.",
+                    parse_mode=ParseMode.MARKDOWN,
+                )
+                return
+            if not resolved or not resolved.get("whop_user_id"):
+                logger.error(f"claim/email: Whop API also found nothing for {text!r}")
+                await update.message.reply_text(
+                    claim_email_not_found(),
+                    reply_markup=keyboards.back_only(),
+                    parse_mode=ParseMode.MARKDOWN,
+                )
+                return
+            code = new_claim_code()
+            claim = resolved
+            logger.info(
+                f"claim/email: Whop API resolved membership={claim.get('whop_membership_id')} "
+                f"synthetic_code={code}"
+            )
 
-    jobs.schedule_onboarding_reminder(context.application, user.id)
+        context.user_data.pop(USER_DATA_AWAITING_WHOP_EMAIL, None)
+        storage.clear_awaiting_claim_email(user.id)
+
+        outcome = await fulfill_claim(
+            telegram_user_id=user.id,
+            username=user.username,
+            first_name=user.first_name,
+            last_name=user.last_name,
+            code=code,
+            claim=claim,
+            bot=context.bot,
+        )
+        await _send_claim_outcome_messages(update, outcome)
+        jobs.schedule_onboarding_reminder(context.application, user.id)
+    except Exception as e:
+        logger.exception(f"claim/email: failed for tg={user.id}: {e}")
+        await update.message.reply_text(
+            "Something went wrong linking your account. Please send `/claim` and try again.",
+            parse_mode=ParseMode.MARKDOWN,
+        )
 
 
 # ---------- Admin: /claims (list pending) ----------

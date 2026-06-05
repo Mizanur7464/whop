@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 from telegram import Update
 from telegram.constants import ParseMode
 from telegram.ext import ContextTypes
@@ -28,12 +30,11 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     chat = update.effective_chat
 
     if chat and chat.type == "private":
-        try:
-            await refresh_commands_for_user(
+        asyncio.create_task(
+            refresh_commands_for_user(
                 context.bot, user.id, is_admin_user=is_admin(user.id)
             )
-        except Exception:
-            pass
+        )
 
     storage.upsert_user(
         user.id,
@@ -45,16 +46,24 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     payload = (context.args[0].lower() if context.args else "").strip()
 
-    if chat and chat.type == "private" and await needs_claim_only_menu(
-        context.bot, user.id
-    ):
-        if payload in ("copytrading", "copy_trading", "support", "supportform"):
-            await update.message.reply_text(
-                join_main_before_onboarding_hint(),
-                parse_mode=ParseMode.MARKDOWN,
-            )
-            return
-        if storage.has_whop_link(user.id):
+    if chat and chat.type == "private" and not is_admin(user.id):
+        if not storage.has_whop_link(user.id):
+            if payload in ("copytrading", "copy_trading", "support", "supportform"):
+                await update.message.reply_text(
+                    join_main_before_onboarding_hint(),
+                    parse_mode=ParseMode.MARKDOWN,
+                )
+                return
+            if payload in ("paid", "whop", "activate", "claim") or not payload:
+                await claim.prompt_whop_activation(update, context)
+                return
+        elif await needs_claim_only_menu(context.bot, user.id):
+            if payload in ("copytrading", "copy_trading", "support", "supportform"):
+                await update.message.reply_text(
+                    join_main_before_onboarding_hint(),
+                    parse_mode=ParseMode.MARKDOWN,
+                )
+                return
             if await user_in_main_group(context.bot, user.id):
                 await onboarding.show_welcome(update, context)
                 jobs.schedule_onboarding_reminder(context.application, user.id)
@@ -63,9 +72,6 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                     join_main_before_onboarding_hint(),
                     parse_mode=ParseMode.MARKDOWN,
                 )
-            return
-        if payload in ("paid", "whop", "activate", "claim") or not payload:
-            await claim.prompt_whop_activation(update, context)
             return
 
     if payload in ("paid", "whop", "activate", "claim"):

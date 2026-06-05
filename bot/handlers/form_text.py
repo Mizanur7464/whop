@@ -12,7 +12,7 @@ from bot.handlers import claim, leave_survey, onboarding, support_channel
 async def on_form_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not is_private_chat(update):
         return
-    if claim.whop_email_activation_active(update, context):
+    if claim.should_handle_whop_email_text(update, context):
         await claim.on_whop_email_text(update, context)
         return
     if leave_survey.leave_reason_active(update, context):

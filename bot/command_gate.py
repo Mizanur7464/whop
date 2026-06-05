@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 from telegram import Update
 from telegram.constants import ParseMode
 from telegram.ext import ContextTypes
@@ -38,7 +40,7 @@ async def block_until_main_group(
         return False
 
     try:
-        await refresh_commands_for_user(context.bot, user.id)
+        asyncio.create_task(refresh_commands_for_user(context.bot, user.id))
         await update.message.reply_text(
             claim_only_command_hint(),
             parse_mode=ParseMode.MARKDOWN,

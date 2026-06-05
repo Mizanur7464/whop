@@ -4,6 +4,8 @@ Gate bot commands until the user has joined TELEGRAM_MAIN_GROUP_ID.
 
 from __future__ import annotations
 
+import asyncio
+
 from loguru import logger
 from telegram import Bot
 from telegram.error import BadRequest, TelegramError
@@ -18,14 +20,26 @@ _IN_MAIN_STATUSES = frozenset(
 )
 
 
+_CHAT_MEMBER_TIMEOUT_SEC = 8.0
+
+
 async def user_in_main_group(bot: Bot, user_id: int) -> bool:
     """True if user is currently a member of the main community supergroup."""
     gid = settings.telegram_main_group_id
     if not gid:
         return True
     try:
-        member = await bot.get_chat_member(chat_id=gid, user_id=user_id)
+        member = await asyncio.wait_for(
+            bot.get_chat_member(chat_id=gid, user_id=user_id),
+            timeout=_CHAT_MEMBER_TIMEOUT_SEC,
+        )
         return member.status in _IN_MAIN_STATUSES
+    except asyncio.TimeoutError:
+        logger.warning(
+            f"main_group_access: get_chat_member timed out for user={user_id} "
+            f"(group={gid}) — treating as not joined"
+        )
+        return False
     except BadRequest as e:
         err = str(e).lower()
         if "user not found" in err or "participant_id_invalid" in err:
