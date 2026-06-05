@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from loguru import logger
-from telegram import CallbackQuery
-from telegram.error import BadRequest
+from telegram import Bot, CallbackQuery, Message
+from telegram.constants import ParseMode
+from telegram.error import BadRequest, TelegramError
 
 
 def is_stale_callback_error(err: BaseException) -> bool:
@@ -13,6 +14,39 @@ def is_stale_callback_error(err: BaseException) -> bool:
         return False
     msg = str(err).lower()
     return "query is too old" in msg or "query id is invalid" in msg
+
+
+async def safe_send_message(
+    bot: Bot,
+    chat_id: int,
+    text: str,
+    *,
+    parse_mode: str | None = ParseMode.MARKDOWN,
+    **kwargs,
+) -> Message | None:
+    """Send a DM; retry without Markdown if entities fail. Never fail silently."""
+    try:
+        return await bot.send_message(
+            chat_id, text, parse_mode=parse_mode, **kwargs
+        )
+    except (BadRequest, TelegramError) as e:
+        err = str(e).lower()
+        if parse_mode is not None and (
+            "can't parse entities" in err or "parse" in err
+        ):
+            logger.debug(f"safe_send: retry without parse_mode to {chat_id}")
+            try:
+                return await bot.send_message(
+                    chat_id, text, parse_mode=None, **kwargs
+                )
+            except TelegramError as e2:
+                logger.error(f"safe_send: plain send failed to {chat_id}: {e2}")
+                return None
+        logger.error(f"safe_send: failed to {chat_id}: {e}")
+        return None
+    except Exception as e:
+        logger.error(f"safe_send: unexpected error to {chat_id}: {e}")
+        return None
 
 
 async def safe_answer_callback(

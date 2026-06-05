@@ -25,9 +25,11 @@ from bot.channel_context import ensure_private_dm
 from bot.community_layout import FLOW_WELCOME
 from bot.decorators import is_admin, log_call
 from bot.main_group_access import refresh_commands_for_user
+from bot.telegram_utils import safe_send_message
 from config import settings
 from integrations import plan_mapping, telegram_ops
 from integrations.whop_claim_resolve import fetch_membership_by_email, new_claim_code
+from integrations.whop_success_invites import primary_invite_url
 from integrations.whop_copy import (
     claim_already_linked,
     claim_code_not_found,
@@ -113,6 +115,13 @@ async def prompt_whop_activation(
         return
     if await reply_if_already_linked(update, context, update.effective_user.id):
         return
+    user = update.effective_user
+    if storage.is_awaiting_claim_email(user.id):
+        await update.message.reply_text(
+            "Please send the email address you used on Whop (one message).",
+            parse_mode=None,
+        )
+        return
     begin_whop_email_activation(update, context)
     await update.message.reply_text(
         claim_email_prompt(), parse_mode=ParseMode.MARKDOWN
@@ -152,18 +161,36 @@ async def fulfill_claim(
         f"-> whop={whop_user_id} membership={claim['whop_membership_id']}"
     )
 
-    invite_url: str | None = None
-    try:
-        invite_url = await asyncio.wait_for(
-            telegram_ops.create_main_group_invite(
-                name=f"claim-{code}-{telegram_user_id}"
-            ),
-            timeout=12.0,
+    invite_url: str | None = primary_invite_url(claim)
+    if invite_url:
+        logger.info(
+            f"fulfill_claim: using pre-generated invite for tg={telegram_user_id}"
         )
-    except asyncio.TimeoutError:
-        logger.error(
-            f"fulfill_claim: invite link timed out for tg={telegram_user_id}"
-        )
+    elif bot is not None:
+        try:
+            invite_url = await asyncio.wait_for(
+                telegram_ops.create_main_group_invite(
+                    name=f"claim-{code}-{telegram_user_id}",
+                    bot_instance=bot,
+                ),
+                timeout=12.0,
+            )
+        except asyncio.TimeoutError:
+            logger.error(
+                f"fulfill_claim: invite link timed out for tg={telegram_user_id}"
+            )
+    else:
+        try:
+            invite_url = await asyncio.wait_for(
+                telegram_ops.create_main_group_invite(
+                    name=f"claim-{code}-{telegram_user_id}"
+                ),
+                timeout=12.0,
+            )
+        except asyncio.TimeoutError:
+            logger.error(
+                f"fulfill_claim: invite link timed out for tg={telegram_user_id}"
+            )
     if not invite_url and chats:
         logger.warning(
             f"fulfill_claim: main invite failed, trying plan chats for tg={telegram_user_id}"
@@ -218,42 +245,37 @@ async def _send_claim_outcome_to_chat(
     *,
     telegram_user_id: int,
     outcome: dict,
-) -> None:
-    """Post success + invite link in the user's private chat."""
-    try:
-        await bot.send_message(
-            chat_id,
-            claim_success_message(),
-            parse_mode=ParseMode.MARKDOWN,
-        )
-    except Exception:
-        await bot.send_message(
-            chat_id, claim_success_message(), parse_mode=None
-        )
+) -> bool:
+    """Post success + invite link in the user's private chat. Returns True if any message sent."""
+    sent_any = False
+    if await safe_send_message(
+        bot, chat_id, claim_success_message(), parse_mode=ParseMode.MARKDOWN
+    ):
+        sent_any = True
     invite_url = outcome.get("invite_url") or outcome.get("grant", {}).get("invite_url")
     if invite_url:
-        await bot.send_message(
+        if await safe_send_message(
+            bot,
             chat_id,
             claim_invite_message(invite_url),
             parse_mode=None,
             disable_web_page_preview=False,
-        )
+        ):
+            sent_any = True
         logger.success(f"claim: invite link sent in-chat for tg={telegram_user_id}")
     else:
         logger.error(
             f"claim: no invite URL for tg={telegram_user_id} "
             f"main_group={settings.telegram_main_group_id}"
         )
-        try:
-            await bot.send_message(
-                chat_id,
-                claim_invite_failed_message(),
-                parse_mode=ParseMode.MARKDOWN,
-            )
-        except Exception:
-            await bot.send_message(
-                chat_id, claim_invite_failed_message(), parse_mode=None
-            )
+        if await safe_send_message(
+            bot,
+            chat_id,
+            claim_invite_failed_message(),
+            parse_mode=ParseMode.MARKDOWN,
+        ):
+            sent_any = True
+    return sent_any
 
 
 async def _send_claim_outcome_messages(
@@ -286,7 +308,7 @@ async def _resolve_claim_from_email(text: str) -> tuple[str, dict] | None:
     try:
         resolved = await asyncio.wait_for(
             fetch_membership_by_email(text),
-            timeout=18.0,
+            timeout=12.0,
         )
     except asyncio.TimeoutError:
         logger.error(f"claim/email: Whop API lookup timed out for {text!r}")
@@ -315,14 +337,18 @@ async def _complete_email_claim(
     email: str,
 ) -> None:
     bot = application.bot
+    user_notified = False
     try:
+        logger.info(f"claim/email: background start tg={user_id} email={email!r}")
         resolved = await _resolve_claim_from_email(email)
         if not resolved:
-            await bot.send_message(
-                chat_id,
-                claim_email_not_found(),
-                reply_markup=keyboards.back_only(),
-                parse_mode=ParseMode.MARKDOWN,
+            user_notified = bool(
+                await safe_send_message(
+                    bot,
+                    chat_id,
+                    claim_email_not_found(),
+                    parse_mode=ParseMode.MARKDOWN,
+                )
             )
             return
 
@@ -339,39 +365,56 @@ async def _complete_email_claim(
                 claim=claim,
                 bot=bot,
             ),
-            timeout=30.0,
+            timeout=25.0,
         )
-        await _send_claim_outcome_to_chat(
+        user_notified = await _send_claim_outcome_to_chat(
             bot, chat_id, telegram_user_id=user_id, outcome=outcome
         )
-        jobs.schedule_onboarding_reminder(application, user_id)
+        try:
+            jobs.schedule_onboarding_reminder(application, user_id)
+        except Exception as e:
+            logger.warning(f"claim/email: reminder schedule failed tg={user_id}: {e}")
+        logger.success(f"claim/email: completed tg={user_id} code={code}")
     except WhopLookupTimeout:
-        await bot.send_message(
-            chat_id,
-            "Whop lookup timed out. Please try again in 30 seconds.",
-            parse_mode=ParseMode.MARKDOWN,
+        user_notified = bool(
+            await safe_send_message(
+                bot,
+                chat_id,
+                "Whop lookup timed out. Please try again in 30 seconds.",
+                parse_mode=ParseMode.MARKDOWN,
+            )
         )
     except asyncio.TimeoutError:
         logger.error(f"claim/email: fulfill timed out for tg={user_id}")
-        try:
-            await bot.send_message(
+        user_notified = bool(
+            await safe_send_message(
+                bot,
                 chat_id,
                 claim_invite_failed_message(),
                 parse_mode=ParseMode.MARKDOWN,
             )
-        except Exception:
-            pass
+        )
     except Exception as e:
         logger.exception(f"claim/email: background claim failed for tg={user_id}: {e}")
-        try:
-            await bot.send_message(
+        user_notified = bool(
+            await safe_send_message(
+                bot,
                 chat_id,
-                "Something went wrong linking your account. Please send `/claim` and try again.",
-                parse_mode=ParseMode.MARKDOWN,
+                "Something went wrong linking your account. Please send /claim and try again.",
+                parse_mode=None,
             )
-        except Exception:
-            pass
+        )
     finally:
+        if not user_notified:
+            logger.error(
+                f"claim/email: user tg={user_id} got Processing but no outcome message"
+            )
+            await safe_send_message(
+                bot,
+                chat_id,
+                "We could not finish linking. Please send /claim and try your email again.",
+                parse_mode=None,
+            )
         _claim_email_busy.discard(user_id)
 
 

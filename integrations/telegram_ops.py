@@ -97,14 +97,16 @@ async def generate_invite_link(
     expire_in_minutes: int = 60 * 24,
     member_limit: int = 1,
     name: str | None = None,
+    bot_instance: Bot | None = None,
 ) -> Optional[str]:
     """
     Create a one-time invite link. The bot must be an admin in `chat_id`
     with the 'invite users' permission.
     """
+    tg = bot_instance or bot()
     try:
         expire_date = datetime.now(timezone.utc) + timedelta(minutes=expire_in_minutes)
-        link = await bot().create_chat_invite_link(
+        link = await tg.create_chat_invite_link(
             chat_id=chat_id,
             expire_date=expire_date,
             member_limit=member_limit,
@@ -116,13 +118,15 @@ async def generate_invite_link(
         return None
 
 
-async def create_main_group_invite(*, name: str = "claim") -> str | None:
+async def create_main_group_invite(
+    *, name: str = "claim", bot_instance: Bot | None = None
+) -> str | None:
     """One-time invite for TELEGRAM_MAIN_GROUP_ID (claim + success page)."""
     gid = settings.telegram_main_group_id
     if not gid:
         logger.error("create_main_group_invite: TELEGRAM_MAIN_GROUP_ID not set")
         return None
-    return await generate_invite_link(gid, name=name)
+    return await generate_invite_link(gid, name=name, bot_instance=bot_instance)
 
 
 async def build_invite_link_list(
