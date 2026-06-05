@@ -23,6 +23,7 @@ from bot import jobs, keyboards, storage
 from bot.channel_context import ensure_private_dm
 from bot.community_layout import FLOW_WELCOME
 from bot.decorators import is_admin, log_call
+from bot.main_group_access import refresh_commands_for_user
 from integrations import plan_mapping, telegram_ops
 from integrations.whop_claim_resolve import fetch_membership_by_email, new_claim_code
 from integrations.whop_copy import (
@@ -30,15 +31,10 @@ from integrations.whop_copy import (
     claim_code_not_found,
     claim_email_not_found,
     claim_email_prompt,
+    claim_success_message,
 )
 
 USER_DATA_AWAITING_WHOP_EMAIL = "awaiting_whop_email"
-
-CLAIM_SUCCESS = (
-    "Your membership is linked.\n\n"
-    "Check this chat for your group invite link(s). "
-    "Then send /onboarding to complete setup."
-)
 
 
 def _email_pattern(text: str) -> bool:
@@ -133,6 +129,12 @@ async def fulfill_claim(
     result = await telegram_ops.grant_access(
         telegram_user_id, chats, plan_name=plan_name
     )
+    try:
+        await refresh_commands_for_user(
+            telegram_ops.bot(), telegram_user_id
+        )
+    except Exception:
+        pass
     return {"plan_name": plan_name, "grant": result}
 
 
@@ -163,7 +165,9 @@ async def cmd_claim(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         )
         return
 
-    await update.message.reply_text(CLAIM_SUCCESS, parse_mode=ParseMode.MARKDOWN)
+    await update.message.reply_text(
+        claim_success_message(), parse_mode=ParseMode.MARKDOWN
+    )
 
     outcome = await fulfill_claim(
         telegram_user_id=user.id,
@@ -238,7 +242,9 @@ async def on_whop_email_text(
         )
 
     context.user_data.pop(USER_DATA_AWAITING_WHOP_EMAIL, None)
-    await update.message.reply_text(CLAIM_SUCCESS, parse_mode=ParseMode.MARKDOWN)
+    await update.message.reply_text(
+        claim_success_message(), parse_mode=ParseMode.MARKDOWN
+    )
 
     outcome = await fulfill_claim(
         telegram_user_id=user.id,

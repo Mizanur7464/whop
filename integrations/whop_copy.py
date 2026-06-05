@@ -17,18 +17,32 @@ def is_free_access() -> bool:
 def claim_email_prompt() -> str:
     if is_free_access():
         return (
-            "Thanks for registering on Whop.\n\n"
+            "Thanks for registering for Fusion Strategy through Whop.\n\n"
             "Reply with the *email address* you used there "
             "(one message). We will link your access and send your "
-            "Telegram group invite here.\n\n"
-            "Have an activation code instead? Send `/claim YOURCODE`."
+            "Telegram group invite here."
         )
     return (
-        "Thanks for your Whop payment.\n\n"
+        "Thanks for registering for Fusion Strategy through Whop.\n\n"
         "Reply with the *email address* you used at checkout "
         "(one message). We will link your membership and send your "
-        "Telegram group invite here.\n\n"
-        "Have an 8-character code instead? Send `/claim YOURCODE`."
+        "Telegram group invite here."
+    )
+
+
+def claim_success_message() -> str:
+    return (
+        "Your membership is linked.\n\n"
+        "Check this chat for the group link and join the group. "
+        "After you have done that, come back and enter `/onboarding` "
+        "to gain access to the channels in the community."
+    )
+
+
+def grant_access_invite_footer() -> str:
+    return (
+        "After joining, come back here and send `/onboarding` "
+        "to gain access to the channels in the community."
     )
 
 
@@ -47,6 +61,19 @@ def claim_email_not_found() -> str:
         "• Wait 30–60 seconds after paying, then try again.\n"
         "• Use the same email as on your Whop receipt.\n"
         "• Still stuck? Tap /support."
+    )
+
+
+def claim_only_command_hint() -> str:
+    if is_free_access():
+        return (
+            "Join the *main community* first using the invite link we sent here.\n\n"
+            "Until you're in that group, only `/claim` is available "
+            "(link your Whop registration)."
+        )
+    return (
+        "Join the *main community* first using the invite link we sent here.\n\n"
+        "Until you're in that group, only `/claim` is available."
     )
 
 
@@ -113,14 +140,9 @@ def success_page_heading() -> str:
 
 
 def success_page_subtitle() -> str:
-    if is_free_access():
-        return (
-            "Thank you for joining via Whop. Use the steps below "
-            "to open Telegram access."
-        )
     return (
-        "Thank you for joining Fusion Strategy. Use the steps below "
-        "to open Telegram access."
+        "Thank you for joining Fusion Strategy through Whop. "
+        "Use the steps below to open Telegram access."
     )
 
 

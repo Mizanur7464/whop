@@ -24,6 +24,7 @@ from telegram.error import BadRequest, Forbidden, TelegramError
 from telegram.ext import Application
 
 from config import settings
+from integrations.whop_copy import grant_access_invite_footer
 
 _app: Optional[Application] = None
 
@@ -173,7 +174,7 @@ async def grant_access(
     for idx, (_, url) in enumerate(valid_links, start=1):
         lines.append(f"{idx}. {url}")
     lines.append("")
-    lines.append("After joining, send /start here to unlock your onboarding checklist.")
+    lines.append(grant_access_invite_footer())
 
     ok = await dm(telegram_user_id, "\n".join(lines))
     return {"sent": ok, "links": links}

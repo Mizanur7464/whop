@@ -39,6 +39,10 @@ MEMBER_DM_COMMANDS: list[BotCommand] = [
 
 PRIVATE_COMMANDS = MEMBER_DM_COMMANDS
 
+CLAIM_ONLY_COMMANDS: list[BotCommand] = [
+    BotCommand("claim", "Link your Whop access"),
+]
+
 WELCOME_CHANNEL_COMMANDS: list[BotCommand] = [
     BotCommand("onboarding", "Begin welcome onboarding"),
 ]
@@ -186,13 +190,37 @@ async def register_all_commands(bot: Bot) -> None:
         logger.warning(f"Commands: could not set global menu button: {e}")
 
 
-async def refresh_chat_commands(bot: Bot, chat_id: int, *, is_admin: bool = False) -> None:
+async def refresh_member_dm_commands(
+    bot: Bot,
+    user_id: int,
+    *,
+    is_admin: bool = False,
+    claim_only: bool = False,
+) -> None:
+    """Per-user private menu (claim-only vs full member list)."""
+    if is_admin:
+        commands = ADMIN_COMMANDS
+    elif claim_only:
+        commands = CLAIM_ONLY_COMMANDS
+    else:
+        commands = PRIVATE_COMMANDS
+    await bot.set_my_commands(commands, scope=BotCommandScopeChat(chat_id=user_id))
+    await ensure_menu_button(bot, chat_id=user_id)
+
+
+async def refresh_chat_commands(
+    bot: Bot,
+    chat_id: int,
+    *,
+    is_admin: bool = False,
+    claim_only: bool = False,
+) -> None:
     if chat_id == settings.telegram_welcome_group_id and not is_admin:
         await clear_welcome_group_command_menu(bot)
         return
-    commands = ADMIN_COMMANDS if is_admin else PRIVATE_COMMANDS
-    await bot.set_my_commands(commands, scope=BotCommandScopeChat(chat_id=chat_id))
-    await ensure_menu_button(bot, chat_id=chat_id)
+    await refresh_member_dm_commands(
+        bot, chat_id, is_admin=is_admin, claim_only=claim_only
+    )
 
 
 async def on_startup_register_commands(app: Application) -> None:

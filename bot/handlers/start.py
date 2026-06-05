@@ -9,8 +9,8 @@ from telegram.ext import ContextTypes
 from bot import jobs, keyboards, storage, texts
 from bot.access import idle_after_complete_message, shows_main_menu
 from bot.channel_context import ensure_welcome_context
-from bot.command_registry import refresh_chat_commands
 from bot.decorators import is_admin, log_call
+from bot.main_group_access import needs_claim_only_menu, refresh_commands_for_user
 from bot.handlers import claim, copy_trading, onboarding, support_channel
 
 
@@ -24,8 +24,8 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     if chat and chat.type == "private":
         try:
-            await refresh_chat_commands(
-                context.bot, chat.id, is_admin=is_admin(user.id)
+            await refresh_commands_for_user(
+                context.bot, user.id, is_admin_user=is_admin(user.id)
             )
         except Exception:
             pass
@@ -39,6 +39,15 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     )
 
     payload = (context.args[0].lower() if context.args else "").strip()
+
+    if chat and chat.type == "private" and await needs_claim_only_menu(
+        context.bot, user.id
+    ):
+        if payload in ("copytrading", "copy_trading", "support", "supportform"):
+            return
+        if payload in ("paid", "whop", "activate", "claim") or not payload:
+            await claim.prompt_whop_activation(update, context)
+            return
 
     if payload in ("paid", "whop", "activate", "claim"):
         if chat and chat.type == "private":

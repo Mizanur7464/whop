@@ -57,6 +57,8 @@ from bot import (
 from bot.command_registry import on_startup_register_commands
 from bot import group_moderation
 from bot.channel_context import swallow_welcome_group_member_command
+from bot.command_gate import block_until_main_group
+from bot.main_group_access import on_user_joined_main_group
 from config import settings
 from integrations import telegram_ops
 
@@ -115,6 +117,16 @@ def build_app() -> Application:
         .post_init(_on_startup)
         .build()
     )
+
+    private_cmds = filters.ChatType.PRIVATE & filters.COMMAND
+
+    async def _claim_only_dm_gate(
+        update: Update, context: ContextTypes.DEFAULT_TYPE
+    ) -> None:
+        if await block_until_main_group(update, context):
+            raise ApplicationHandlerStop()
+
+    app.add_handler(MessageHandler(private_cmds, _claim_only_dm_gate), group=-2)
 
     if settings.telegram_welcome_group_id:
 
@@ -179,6 +191,12 @@ def build_app() -> Application:
         app.add_handler(
             ChatMemberHandler(
                 leave_survey.on_chat_member,
+                ChatMemberHandler.CHAT_MEMBER,
+            )
+        )
+        app.add_handler(
+            ChatMemberHandler(
+                on_user_joined_main_group,
                 ChatMemberHandler.CHAT_MEMBER,
             )
         )
