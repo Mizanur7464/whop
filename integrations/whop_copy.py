@@ -39,6 +39,21 @@ def claim_success_message() -> str:
     )
 
 
+def claim_invite_message(invite_url: str) -> str:
+    return (
+        "🎉 Your main group invite (one-time use):\n"
+        f"{invite_url}\n\n"
+        f"{grant_access_invite_footer()}"
+    )
+
+
+def claim_invite_failed_message() -> str:
+    return (
+        "We could not generate your group invite link right now.\n\n"
+        "Please wait 30 seconds and send `/claim` again, or contact support."
+    )
+
+
 def grant_access_invite_footer() -> str:
     return (
         "After joining, come back here and send `/onboarding` "

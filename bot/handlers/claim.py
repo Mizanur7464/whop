@@ -24,6 +24,7 @@ from bot.channel_context import ensure_private_dm
 from bot.community_layout import FLOW_WELCOME
 from bot.decorators import is_admin, log_call
 from bot.main_group_access import refresh_commands_for_user
+from config import settings
 from integrations import plan_mapping, telegram_ops
 from integrations.whop_claim_resolve import fetch_membership_by_email, new_claim_code
 from integrations.whop_copy import (
@@ -31,6 +32,8 @@ from integrations.whop_copy import (
     claim_code_not_found,
     claim_email_not_found,
     claim_email_prompt,
+    claim_invite_failed_message,
+    claim_invite_message,
     claim_success_message,
 )
 
@@ -117,9 +120,24 @@ async def fulfill_claim(
         f"-> whop={whop_user_id} membership={claim['whop_membership_id']}"
     )
 
-    result = await telegram_ops.grant_access(
-        telegram_user_id, chats, plan_name=plan_name
+    invite_url = await telegram_ops.create_main_group_invite(
+        name=f"claim-{code}-{telegram_user_id}"
     )
+    if not invite_url and chats:
+        logger.warning(
+            f"fulfill_claim: main invite failed, trying plan chats for tg={telegram_user_id}"
+        )
+        links = await telegram_ops.build_invite_link_list(chats, plan_name=plan_name)
+        if links:
+            invite_url = links[0].get("url")
+
+    result = {
+        "sent": bool(invite_url),
+        "links": {settings.telegram_main_group_id: invite_url}
+        if settings.telegram_main_group_id
+        else {},
+        "invite_url": invite_url,
+    }
     try:
         await airtable_sync.member_joined(
             telegram_user_id=telegram_user_id,
@@ -137,7 +155,35 @@ async def fulfill_claim(
         )
     except Exception as e:
         logger.warning(f"fulfill_claim: refresh commands failed for tg={telegram_user_id}: {e}")
-    return {"plan_name": plan_name, "grant": result}
+    return {"plan_name": plan_name, "grant": result, "invite_url": invite_url}
+
+
+async def _send_claim_outcome_messages(
+    update: Update, outcome: dict
+) -> None:
+    """Post success + invite link in the same private chat (not a separate DM)."""
+    if not update.message:
+        return
+    await update.message.reply_text(
+        claim_success_message(), parse_mode=ParseMode.MARKDOWN
+    )
+    invite_url = outcome.get("invite_url") or outcome.get("grant", {}).get("invite_url")
+    if invite_url:
+        await update.message.reply_text(
+            claim_invite_message(invite_url),
+            parse_mode=None,
+            disable_web_page_preview=False,
+        )
+        logger.success(f"claim: invite link sent in-chat for tg={update.effective_user.id}")
+    else:
+        logger.error(
+            f"claim: no invite URL for tg={update.effective_user.id} "
+            f"main_group={settings.telegram_main_group_id}"
+        )
+        await update.message.reply_text(
+            claim_invite_failed_message(),
+            parse_mode=ParseMode.MARKDOWN,
+        )
 
 
 @log_call
@@ -167,10 +213,6 @@ async def cmd_claim(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         )
         return
 
-    await update.message.reply_text(
-        claim_success_message(), parse_mode=ParseMode.MARKDOWN
-    )
-
     outcome = await fulfill_claim(
         telegram_user_id=user.id,
         username=user.username,
@@ -179,12 +221,7 @@ async def cmd_claim(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         code=code,
         claim=claim,
     )
-    if not outcome["grant"]["sent"]:
-        await update.message.reply_text(
-            "I couldn't DM you the invite links. Please tap /start once, "
-            "then send `/claim` again or `/claim` with your code.",
-            parse_mode=ParseMode.MARKDOWN,
-        )
+    await _send_claim_outcome_messages(update, outcome)
 
     jobs.schedule_onboarding_reminder(context.application, user.id)
 
@@ -244,9 +281,6 @@ async def on_whop_email_text(
         )
 
     context.user_data.pop(USER_DATA_AWAITING_WHOP_EMAIL, None)
-    await update.message.reply_text(
-        claim_success_message(), parse_mode=ParseMode.MARKDOWN
-    )
 
     outcome = await fulfill_claim(
         telegram_user_id=user.id,
@@ -256,16 +290,7 @@ async def on_whop_email_text(
         code=code,
         claim=claim,
     )
-    if not outcome["grant"]["sent"]:
-        logger.error(
-            f"claim/email: grant_access failed for tg={user.id} links={outcome['grant'].get('links')}"
-        )
-        await update.message.reply_text(
-            "Membership linked, but invite links failed. Tap /start and contact /support.",
-            parse_mode=ParseMode.MARKDOWN,
-        )
-    else:
-        logger.success(f"claim/email: invite sent to tg={user.id} plan={outcome.get('plan_name')}")
+    await _send_claim_outcome_messages(update, outcome)
 
     jobs.schedule_onboarding_reminder(context.application, user.id)
 

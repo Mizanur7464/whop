@@ -116,6 +116,15 @@ async def generate_invite_link(
         return None
 
 
+async def create_main_group_invite(*, name: str = "claim") -> str | None:
+    """One-time invite for TELEGRAM_MAIN_GROUP_ID (claim + success page)."""
+    gid = settings.telegram_main_group_id
+    if not gid:
+        logger.error("create_main_group_invite: TELEGRAM_MAIN_GROUP_ID not set")
+        return None
+    return await generate_invite_link(gid, name=name)
+
+
 async def build_invite_link_list(
     chat_ids: Iterable[int],
     *,
