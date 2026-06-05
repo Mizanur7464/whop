@@ -75,9 +75,16 @@ async def _run_bot(stop_event: asyncio.Event) -> None:
             )
             await asyncio.sleep(delay_sec)
             delay_sec = min(delay_sec * 2, 60)
-        except Exception:
+        except Exception as e:
             await _shutdown_bot(app)
-            raise
+            if stop_event.is_set():
+                return
+            logger.exception(
+                f"Telegram bot crashed (attempt {attempt}): {e}. "
+                f"Restarting in {delay_sec}s…"
+            )
+            await asyncio.sleep(delay_sec)
+            delay_sec = min(delay_sec * 2, 60)
 
     logger.info("Stopping Telegram bot…")
     await _shutdown_bot(app)

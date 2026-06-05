@@ -114,6 +114,7 @@ def build_app() -> Application:
         ApplicationBuilder()
         .token(settings.telegram_bot_token)
         .request(request)
+        .concurrent_updates(True)
         .post_init(_on_startup)
         .build()
     )
