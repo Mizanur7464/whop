@@ -17,12 +17,15 @@ from urllib.parse import urlencode, urlparse
 from config import settings
 from integrations.whop_copy import (
     success_page_heading,
+    success_page_invite_heading,
+    success_page_invite_hint,
     success_page_preparing,
     success_page_still_processing,
     success_page_subtitle,
     success_page_title,
     success_page_wait_hint,
 )
+from integrations.whop_success_invites import ensure_pending_claim_invite_links
 
 SUCCESS_PATH = "/whop/success"
 STATUS_PATH = "/api/claim/status"
@@ -55,34 +58,45 @@ def telegram_claim_deep_link() -> str:
     return telegram_bot_url()
 
 
-def lookup_claim_status(
+def _find_pending_claim(
     *,
     membership_id: str | None = None,
     code: str | None = None,
     email: str | None = None,
-) -> dict[str, Any]:
+) -> tuple[str, dict] | None:
     from bot import storage
 
     found: tuple[str, dict] | None = None
-
     if membership_id:
         found = storage.find_pending_claim_by_membership_id(membership_id)
     if not found and code:
         found = storage.find_pending_claim_by_code(code.strip().upper())
     if not found and email:
         found = storage.find_pending_claim_by_email(email)
+    return found
 
+
+def lookup_claim_status(
+    *,
+    membership_id: str | None = None,
+    code: str | None = None,
+    email: str | None = None,
+) -> dict[str, Any]:
+    """Sync peek (no invite generation). Prefer lookup_claim_status_async."""
     bot_url = telegram_bot_url()
     claim_link = telegram_claim_deep_link()
-
+    found = _find_pending_claim(
+        membership_id=membership_id, code=code, email=email
+    )
     if not found:
         return {
             "ready": False,
             "bot_url": bot_url,
             "claim_url": claim_link,
         }
-
     claim_code, data = found
+    invite_links = data.get("invite_links") if isinstance(data.get("invite_links"), list) else []
+    primary = invite_links[0].get("url") if invite_links and isinstance(invite_links[0], dict) else None
     return {
         "ready": True,
         "code": claim_code,
@@ -91,7 +105,36 @@ def lookup_claim_status(
         "claim_url": claim_link,
         "claim_command": f"/claim {claim_code}",
         "email_hint": data.get("email"),
+        "invite_links": invite_links,
+        "primary_invite_url": primary,
     }
+
+
+async def lookup_claim_status_async(
+    *,
+    membership_id: str | None = None,
+    code: str | None = None,
+    email: str | None = None,
+) -> dict[str, Any]:
+    """Poll endpoint: ensures Telegram invite links exist when claim is ready."""
+    payload = lookup_claim_status(
+        membership_id=membership_id, code=code, email=email
+    )
+    if not payload.get("ready"):
+        return payload
+
+    found = _find_pending_claim(
+        membership_id=membership_id, code=code, email=email
+    )
+    if not found:
+        return payload
+
+    claim_code, data = found
+    invite_links = await ensure_pending_claim_invite_links(claim_code, data)
+    primary = invite_links[0]["url"] if invite_links else None
+    payload["invite_links"] = invite_links
+    payload["primary_invite_url"] = primary
+    return payload
 
 
 def render_success_html(query_params: dict[str, str]) -> str:
@@ -147,6 +190,19 @@ def render_success_html(query_params: dict[str, str]) -> str:
     .btn:hover {{ background: #fbbf24; }}
     .hint {{ font-size: 0.85rem; color: #94a3b8; margin-top: 16px; line-height: 1.5; }}
     .cmd {{ font-family: ui-monospace, monospace; color: #e2e8f0; }}
+    .invite-list {{ text-align: left; margin: 12px 0; }}
+    .invite-list a {{
+      display: block; margin: 8px 0; padding: 12px 14px;
+      background: #0f172a; border-radius: 10px; color: #38bdf8;
+      text-decoration: none; font-weight: 600; word-break: break-all;
+    }}
+    .invite-list a:hover {{ background: #1e293b; }}
+    .btn-secondary {{
+      display: inline-block; margin-top: 8px; padding: 10px 18px;
+      background: transparent; color: #94a3b8; font-weight: 600;
+      text-decoration: none; border: 1px solid #475569; border-radius: 10px;
+      font-size: 0.9rem;
+    }}
   </style>
 </head>
 <body>
@@ -159,7 +215,15 @@ def render_success_html(query_params: dict[str, str]) -> str:
       <p class="sub">{escape(success_page_preparing())}</p>
     </div>
 
-    <div id="ready" class="hidden">
+    <div id="ready-invite" class="hidden">
+      <p class="sub">{escape(success_page_invite_heading())}</p>
+      <div class="invite-list" id="invite-links"></div>
+      <a class="btn" id="primary-invite-btn" href="#" target="_blank" rel="noopener">Join main group</a>
+      <p class="hint">{escape(success_page_invite_hint())}</p>
+      <a class="btn-secondary" id="bot-btn-invite" href="{claim_url}" target="_blank" rel="noopener">Open bot for onboarding</a>
+    </div>
+
+    <div id="ready-code" class="hidden">
       <p class="sub">Your activation code</p>
       <div class="code-box" id="code">--------</div>
       <p class="hint">In Telegram, send <span class="cmd" id="claim-cmd">/claim</span> or tap the button below.</p>
@@ -179,9 +243,31 @@ def render_success_html(query_params: dict[str, str]) -> str:
     let attempts = 0;
 
     function show(id) {{
-      ["loading", "ready", "wait"].forEach(s => {{
-        document.getElementById(s).classList.toggle("hidden", s !== id);
+      ["loading", "ready-invite", "ready-code", "wait"].forEach(s => {{
+        const el = document.getElementById(s);
+        if (el) el.classList.toggle("hidden", s !== id);
       }});
+    }}
+
+    function renderInvites(data) {{
+      const list = document.getElementById("invite-links");
+      list.innerHTML = "";
+      const links = data.invite_links || [];
+      links.forEach((item, i) => {{
+        const a = document.createElement("a");
+        a.href = item.url;
+        a.target = "_blank";
+        a.rel = "noopener";
+        a.textContent = (item.label || ("Group " + (i + 1)));
+        list.appendChild(a);
+      }});
+      const primary = data.primary_invite_url || (links[0] && links[0].url);
+      const btn = document.getElementById("primary-invite-btn");
+      if (primary) btn.href = primary;
+      if (data.claim_url) {{
+        const botBtn = document.getElementById("bot-btn-invite");
+        if (botBtn) botBtn.href = data.claim_url;
+      }}
     }}
 
     async function poll() {{
@@ -189,12 +275,20 @@ def render_success_html(query_params: dict[str, str]) -> str:
       try {{
         const res = await fetch(statusUrl);
         const data = await res.json();
-        if (data.ready && data.code) {{
-          document.getElementById("code").textContent = data.code;
-          document.getElementById("claim-cmd").textContent = data.claim_command || ("/claim " + data.code);
-          if (data.claim_url) document.getElementById("bot-btn").href = data.claim_url;
-          show("ready");
-          return;
+        if (data.ready) {{
+          const hasInvite = data.primary_invite_url || (data.invite_links && data.invite_links.length);
+          if (hasInvite) {{
+            renderInvites(data);
+            show("ready-invite");
+            return;
+          }}
+          if (data.code) {{
+            document.getElementById("code").textContent = data.code;
+            document.getElementById("claim-cmd").textContent = data.claim_command || ("/claim " + data.code);
+            if (data.claim_url) document.getElementById("bot-btn").href = data.claim_url;
+            show("ready-code");
+            return;
+          }}
         }}
       }} catch (e) {{}}
       if (attempts >= maxAttempts) {{

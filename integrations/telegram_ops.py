@@ -23,7 +23,20 @@ from telegram.constants import ParseMode
 from telegram.error import BadRequest, Forbidden, TelegramError
 from telegram.ext import Application
 
+from config import settings
+
 _app: Optional[Application] = None
+
+
+def chat_label(chat_id: int) -> str:
+    """Human label for invite links on the Whop success page."""
+    if chat_id == settings.telegram_main_group_id:
+        return "Main community"
+    if chat_id == settings.telegram_vip_group_id:
+        return "VIP group"
+    if chat_id == settings.telegram_announcement_channel_id:
+        return "Announcements"
+    return "Telegram group"
 
 
 def set_bot(app: Application) -> None:
@@ -100,6 +113,27 @@ async def generate_invite_link(
     except TelegramError as e:
         logger.error(f"create_chat_invite_link failed for chat {chat_id}: {e}")
         return None
+
+
+async def build_invite_link_list(
+    chat_ids: Iterable[int],
+    *,
+    plan_name: str = "membership",
+) -> list[dict[str, str]]:
+    """
+    Create one-time invite links for the success page (no Telegram user required).
+
+    Returns [{"label": "Main community", "url": "https://t.me/+..."}, ...].
+    """
+    out: list[dict[str, str]] = []
+    for chat_id in chat_ids:
+        url = await generate_invite_link(
+            chat_id,
+            name=f"whop-{plan_name}-{chat_id}",
+        )
+        if url:
+            out.append({"label": chat_label(chat_id), "url": url})
+    return out
 
 
 # ---------- Grant access ----------

@@ -345,6 +345,18 @@ def add_pending_claim(
         _save()
 
 
+def update_pending_claim(claim_code: str, **fields) -> bool:
+    """Patch fields on a pending claim (e.g. invite links for success page)."""
+    key = (claim_code or "").strip().upper()
+    with _lock:
+        claim = _pending_claims.get(key)
+        if not claim:
+            return False
+        claim.update(fields)
+        _save()
+        return True
+
+
 def pop_pending_claim(claim_code: str) -> Optional[dict]:
     """Consume a claim code (one-time use)."""
     with _lock:

@@ -126,8 +126,19 @@ def success_page_subtitle() -> str:
 
 def success_page_preparing() -> str:
     if is_free_access():
-        return "Preparing your activation code…"
-    return "Preparing your activation code…"
+        return "Preparing your Telegram group invite…"
+    return "Preparing your Telegram group invite…"
+
+
+def success_page_invite_heading() -> str:
+    return "Join the main community group"
+
+
+def success_page_invite_hint() -> str:
+    return (
+        "This link is personal and one-time use. After joining, open our bot "
+        "and send /onboarding to finish setup."
+    )
 
 
 def success_page_still_processing() -> str:

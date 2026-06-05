@@ -32,7 +32,7 @@ from integrations import whop_events
 from integrations.whop_success_page import (
     SUCCESS_PATH,
     STATUS_PATH,
-    lookup_claim_status,
+    lookup_claim_status_async,
     render_success_html,
 )
 
@@ -112,7 +112,9 @@ def create_app() -> FastAPI:
     ) -> JSONResponse:
         """Poll until webhook has created a pending claim."""
         mid = membership_id or membership or id
-        payload = lookup_claim_status(membership_id=mid, code=code, email=email)
+        payload = await lookup_claim_status_async(
+            membership_id=mid, code=code, email=email
+        )
         return JSONResponse(payload)
 
     return app

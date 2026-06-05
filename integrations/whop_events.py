@@ -206,6 +206,12 @@ async def on_membership_valid(payload: dict) -> None:
         plan=plan_name,
         email=checkout_email,
     )
+    from integrations.whop_success_invites import ensure_pending_claim_invite_links
+
+    claim_data = storage.find_pending_claim_by_code(code)
+    if claim_data:
+        _, data = claim_data
+        await ensure_pending_claim_invite_links(code, data)
     if not checkout_email:
         logger.warning(
             f"Pending claim {code} has no email in webhook — "
