@@ -188,6 +188,21 @@ async def silence_group_member_command(
     return True
 
 
+async def swallow_welcome_group_member_command(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> bool:
+    """
+    In the Welcome group, block member slash commands (menu hidden; no public /claim).
+    Returns True when the update was handled and callers should stop.
+    """
+    if not is_welcome_group(update) or is_private_chat(update):
+        return False
+    user = update.effective_user
+    if user and user.id in settings.telegram_admin_ids:
+        return False
+    return await silence_group_member_command(update, context)
+
+
 async def ensure_welcome_context(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> bool:

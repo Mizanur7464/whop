@@ -20,6 +20,7 @@ from telegram import (
     BotCommandScopeChat,
     BotCommandScopeDefault,
     MenuButtonCommands,
+    MenuButtonDefault,
 )
 from telegram.ext import Application
 
@@ -102,6 +103,23 @@ async def ensure_menu_button(bot: Bot, *, chat_id: int | None = None) -> None:
     await bot.set_chat_menu_button(**kwargs)
 
 
+async def clear_welcome_group_command_menu(bot: Bot) -> None:
+    """
+    Hide the / command list in TELEGRAM_WELCOME_GROUP_ID only.
+
+    Members should use the pinned Whop link; DM keeps the full command menu.
+    """
+    gid = settings.telegram_welcome_group_id
+    if not gid:
+        return
+    try:
+        await bot.set_my_commands([], scope=BotCommandScopeChat(chat_id=gid))
+        await bot.set_chat_menu_button(chat_id=gid, menu_button=MenuButtonDefault())
+        logger.info(f"Commands: hidden slash menu in Welcome group (chat_id={gid})")
+    except Exception as e:
+        logger.warning(f"Commands: could not clear Welcome group menu ({gid}): {e}")
+
+
 async def register_all_commands(bot: Bot) -> None:
     await bot.set_my_commands(PRIVATE_COMMANDS, scope=BotCommandScopeDefault())
     await bot.set_my_commands(PRIVATE_COMMANDS, scope=BotCommandScopeAllPrivateChats())
@@ -159,6 +177,8 @@ async def register_all_commands(bot: Bot) -> None:
         except Exception as e:
             logger.warning(f"Commands: could not set admin menu for {admin_id}: {e}")
 
+    await clear_welcome_group_command_menu(bot)
+
     try:
         await ensure_menu_button(bot)
         logger.info("Commands: global menu button set to command list")
@@ -167,6 +187,9 @@ async def register_all_commands(bot: Bot) -> None:
 
 
 async def refresh_chat_commands(bot: Bot, chat_id: int, *, is_admin: bool = False) -> None:
+    if chat_id == settings.telegram_welcome_group_id and not is_admin:
+        await clear_welcome_group_command_menu(bot)
+        return
     commands = ADMIN_COMMANDS if is_admin else PRIVATE_COMMANDS
     await bot.set_my_commands(commands, scope=BotCommandScopeChat(chat_id=chat_id))
     await ensure_menu_button(bot, chat_id=chat_id)

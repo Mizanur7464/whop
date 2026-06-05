@@ -20,9 +20,11 @@ from telegram import Update
 from telegram.ext import (
     Application,
     ApplicationBuilder,
+    ApplicationHandlerStop,
     CallbackQueryHandler,
     ChatMemberHandler,
     CommandHandler,
+    ContextTypes,
     MessageHandler,
     filters,
 )
@@ -54,6 +56,7 @@ from bot import (
 )
 from bot.command_registry import on_startup_register_commands
 from bot import group_moderation
+from bot.channel_context import swallow_welcome_group_member_command
 from config import settings
 from integrations import telegram_ops
 
@@ -112,6 +115,20 @@ def build_app() -> Application:
         .post_init(_on_startup)
         .build()
     )
+
+    if settings.telegram_welcome_group_id:
+
+        async def _welcome_group_command_gate(
+            update: Update, context: ContextTypes.DEFAULT_TYPE
+        ) -> None:
+            if await swallow_welcome_group_member_command(update, context):
+                raise ApplicationHandlerStop()
+
+        welcome_cmds = filters.Chat(chat_id=settings.telegram_welcome_group_id) & filters.COMMAND
+        app.add_handler(
+            MessageHandler(welcome_cmds, _welcome_group_command_gate),
+            group=-2,
+        )
 
     app.add_handler(CommandHandler("start", start.cmd_start))
     app.add_handler(CommandHandler("help", help_h.cmd_help))
