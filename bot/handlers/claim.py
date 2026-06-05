@@ -35,6 +35,7 @@ from integrations.whop_copy import (
     claim_email_prompt,
     claim_invite_failed_message,
     claim_invite_message,
+    claim_processing_message,
     claim_success_message,
 )
 
@@ -152,7 +153,7 @@ async def fulfill_claim(
             telegram_ops.create_main_group_invite(
                 name=f"claim-{code}-{telegram_user_id}"
             ),
-            timeout=20.0,
+            timeout=12.0,
         )
     except asyncio.TimeoutError:
         logger.error(
@@ -165,7 +166,7 @@ async def fulfill_claim(
         try:
             links = await asyncio.wait_for(
                 telegram_ops.build_invite_link_list(chats, plan_name=plan_name),
-                timeout=20.0,
+                timeout=12.0,
             )
             if links:
                 invite_url = links[0].get("url")
@@ -301,8 +302,8 @@ async def on_whop_email_text(
             return
 
         await update.message.reply_text(
-            "One moment — linking your Whop registration…",
-            parse_mode=ParseMode.MARKDOWN,
+            claim_processing_message(),
+            parse_mode=None,
         )
 
         logger.info(
@@ -326,7 +327,7 @@ async def on_whop_email_text(
             try:
                 resolved = await asyncio.wait_for(
                     fetch_membership_by_email(text),
-                    timeout=25.0,
+                    timeout=18.0,
                 )
             except asyncio.TimeoutError:
                 logger.error(f"claim/email: Whop API lookup timed out for {text!r}")

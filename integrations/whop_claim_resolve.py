@@ -42,6 +42,61 @@ def _membership_ids(m: dict) -> tuple[str | None, str | None, str | None]:
     )
 
 
+def _claim_payload(
+    *,
+    whop_user: str | None,
+    membership_id: str | None,
+    product_id: str | None,
+    email: str,
+) -> dict[str, Any]:
+    return {
+        "whop_user_id": whop_user,
+        "whop_membership_id": membership_id,
+        "product_id": product_id,
+        "plan": plan_mapping.resolve_plan_name(product_id),
+        "email": email,
+    }
+
+
+async def _match_membership_row(
+    client: WhopClient, m: dict, target: str
+) -> dict[str, Any] | None:
+    mem_email = _email_from_membership(m)
+    whop_user, membership_id, product_id = _membership_ids(m)
+    if mem_email == target:
+        logger.info(
+            f"whop_claim_resolve: match membership={membership_id} "
+            f"whop_user={whop_user} product={product_id}"
+        )
+        return _claim_payload(
+            whop_user=whop_user,
+            membership_id=membership_id,
+            product_id=product_id,
+            email=target,
+        )
+
+    if whop_user and not mem_email:
+        try:
+            user_data = await client.get_user(whop_user)
+            u_email = (user_data.get("email") or "").strip().lower()
+            if u_email == target:
+                logger.info(
+                    f"whop_claim_resolve: match via get_user "
+                    f"membership={membership_id} whop_user={whop_user}"
+                )
+                return _claim_payload(
+                    whop_user=whop_user,
+                    membership_id=membership_id,
+                    product_id=product_id,
+                    email=target,
+                )
+        except WhopAPIError as e:
+            logger.warning(
+                f"whop_claim_resolve: get_user({whop_user}) failed: {e.status}"
+            )
+    return None
+
+
 async def fetch_membership_by_email(email: str) -> dict[str, Any] | None:
     """Query Whop API for a valid membership matching checkout email."""
     target = email.strip().lower()
@@ -52,46 +107,24 @@ async def fetch_membership_by_email(email: str) -> dict[str, Any] | None:
     logger.info(f"whop_claim_resolve: Whop API lookup for email={target!r}")
     try:
         async with WhopClient() as client:
-            memberships = await client.iter_memberships(valid=True)
-            logger.info(
-                f"whop_claim_resolve: fetched {len(memberships)} valid membership(s) from Whop"
-            )
-            for m in memberships:
-                mem_email = _email_from_membership(m)
-                whop_user, membership_id, product_id = _membership_ids(m)
-                if mem_email == target:
-                    logger.info(
-                        f"whop_claim_resolve: match membership={membership_id} "
-                        f"whop_user={whop_user} product={product_id}"
-                    )
-                    return {
-                        "whop_user_id": whop_user,
-                        "whop_membership_id": membership_id,
-                        "product_id": product_id,
-                        "plan": plan_mapping.resolve_plan_name(product_id),
-                        "email": target,
-                    }
+            page = 1
+            while True:
+                payload = await client.list_memberships(valid=True, page=page, per=50)
+                data = payload.get("data") or []
+                for m in data:
+                    matched = await _match_membership_row(client, m, target)
+                    if matched:
+                        return matched
 
-                if whop_user and not mem_email:
-                    try:
-                        user_data = await client.get_user(whop_user)
-                        u_email = (user_data.get("email") or "").strip().lower()
-                        if u_email == target:
-                            logger.info(
-                                f"whop_claim_resolve: match via get_user "
-                                f"membership={membership_id} whop_user={whop_user}"
-                            )
-                            return {
-                                "whop_user_id": whop_user,
-                                "whop_membership_id": membership_id,
-                                "product_id": product_id,
-                                "plan": plan_mapping.resolve_plan_name(product_id),
-                                "email": target,
-                            }
-                    except WhopAPIError as e:
-                        logger.warning(
-                            f"whop_claim_resolve: get_user({whop_user}) failed: {e.status}"
-                        )
+                pagination = payload.get("pagination") or {}
+                total_pages = (
+                    pagination.get("total_pages")
+                    or pagination.get("total_page")
+                    or page
+                )
+                if page >= total_pages or not data:
+                    break
+                page += 1
     except WhopAPIError as e:
         logger.error(f"whop_claim_resolve: Whop API error status={e.status}")
         return None

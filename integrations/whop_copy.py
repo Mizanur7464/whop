@@ -14,6 +14,10 @@ def is_free_access() -> bool:
     return bool(settings.whop_free_access)
 
 
+def claim_processing_message() -> str:
+    return "Processing............"
+
+
 def claim_email_prompt() -> str:
     if is_free_access():
         return (
