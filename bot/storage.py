@@ -18,7 +18,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 from pathlib import Path
-from threading import Lock
+from threading import RLock
 from typing import Optional
 
 from loguru import logger
@@ -27,7 +27,8 @@ _SNAPSHOT = Path("logs/users_snapshot.json")
 _PENDING_PATH = Path("logs/pending_claims.json")
 _WHOP_INDEX_PATH = Path("logs/whop_user_index.json")
 
-_lock = Lock()
+# Reentrant — upsert_user() is called from helpers that already hold the lock.
+_lock = RLock()
 _users: dict[int, dict] = {}
 
 # claim_code -> {"whop_user_id", "whop_membership_id", "product_id", "created_at"}
