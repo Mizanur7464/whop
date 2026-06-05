@@ -94,10 +94,10 @@ class WhopClient:
 
     async def get_me(self) -> dict:
         """Sanity check: returns the company tied to this API key."""
-        return await self._request("GET", "/me")
+        return await self._request("GET", "/company")
 
     async def get_membership(self, membership_id: str) -> dict:
-        return await self._request("GET", f"/memberships/{membership_id}")
+        return await self._request("GET", f"/company/memberships/{membership_id}")
 
     async def list_memberships(
         self,
@@ -112,7 +112,7 @@ class WhopClient:
             params["valid"] = "true" if valid else "false"
         if product_id:
             params["product_id"] = product_id
-        return await self._request("GET", "/memberships", params=params)
+        return await self._request("GET", "/company/memberships", params=params)
 
     async def iter_memberships(self, **filters) -> list[dict]:
         """Walk all pages and return a flat list of memberships."""
@@ -123,17 +123,18 @@ class WhopClient:
             data = payload.get("data") or []
             results.extend(data)
             pagination = payload.get("pagination") or {}
-            if page >= pagination.get("total_page", page):
+            total_pages = pagination.get("total_pages") or pagination.get("total_page") or page
+            if page >= total_pages:
                 break
             page += 1
         return results
 
     async def get_user(self, user_id: str) -> dict:
-        return await self._request("GET", f"/users/{user_id}")
+        return await self._request("GET", f"/company/users/{user_id}")
 
     async def get_product(self, product_id: str) -> dict:
-        return await self._request("GET", f"/products/{product_id}")
+        return await self._request("GET", f"/company/products/{product_id}")
 
     async def terminate_membership(self, membership_id: str) -> dict:
         """Force-end a membership (refund/manual cancel scenarios)."""
-        return await self._request("POST", f"/memberships/{membership_id}/terminate")
+        return await self._request("POST", f"/company/memberships/{membership_id}/terminate")

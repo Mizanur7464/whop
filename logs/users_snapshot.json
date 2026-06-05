@@ -37,5 +37,24 @@
     "copytrading_completed": true,
     "copytrading_platform": "Vantage",
     "copytrading_completed_at": "2026-06-04T04:14:15.370013+00:00"
+  },
+  "7626313617": {
+    "user_id": 7626313617,
+    "joined_at": "2026-06-05T08:08:22.226828+00:00",
+    "status": "active",
+    "plan": "unknown",
+    "checklist": {},
+    "username": "expert_deve",
+    "first_name": "Bot",
+    "last_name": "Expert",
+    "language_code": "en",
+    "updated_at": "2026-06-05T08:26:06.654110+00:00",
+    "onboarding_started_at": "2026-06-05T08:26:06.654110+00:00",
+    "onboarding_completed": false,
+    "onboarding_completed_at": null,
+    "approval_status": "",
+    "screenshot_file_id": null,
+    "terms_accepted_at": null,
+    "terms_accepted": false
   }
 }

@@ -24,7 +24,9 @@ from bot.channel_context import ensure_private_dm
 from bot.community_layout import FLOW_WELCOME
 from bot.decorators import is_admin, log_call
 from integrations import plan_mapping, telegram_ops
+from integrations.whop_claim_resolve import fetch_membership_by_email, new_claim_code
 from integrations.whop_copy import (
+    claim_already_linked,
     claim_code_not_found,
     claim_email_not_found,
     claim_email_prompt,
@@ -47,6 +49,28 @@ def whop_email_activation_active(_: Update, context: ContextTypes.DEFAULT_TYPE) 
     return bool(context.user_data.get(USER_DATA_AWAITING_WHOP_EMAIL))
 
 
+async def reply_if_already_linked(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    telegram_user_id: int,
+) -> bool:
+    """If user already claimed, warn and return True (caller should stop)."""
+    if is_admin(telegram_user_id):
+        return False
+    if not storage.has_whop_link(telegram_user_id):
+        return False
+    if not update.message:
+        return True
+    context.user_data.pop(USER_DATA_AWAITING_WHOP_EMAIL, None)
+    logger.info(f"claim: already linked tg={telegram_user_id}")
+    await update.message.reply_text(
+        claim_already_linked(),
+        reply_markup=keyboards.back_only(),
+        parse_mode=ParseMode.MARKDOWN,
+    )
+    return True
+
+
 def begin_whop_email_activation(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> None:
@@ -56,7 +80,9 @@ def begin_whop_email_activation(
 async def prompt_whop_activation(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> None:
-    if not update.message:
+    if not update.message or not update.effective_user:
+        return
+    if await reply_if_already_linked(update, context, update.effective_user.id):
         return
     begin_whop_email_activation(update, context)
     await update.message.reply_text(
@@ -118,6 +144,8 @@ async def cmd_claim(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     user = update.effective_user
+    if await reply_if_already_linked(update, context, user.id):
+        return
 
     if not context.args:
         await prompt_whop_activation(update, context)
@@ -163,6 +191,10 @@ async def on_whop_email_text(
     if not update.message or not update.effective_user:
         return
 
+    user = update.effective_user
+    if await reply_if_already_linked(update, context, user.id):
+        return
+
     text = (update.message.text or "").strip()
     if not _email_pattern(text):
         await update.message.reply_text(
@@ -171,23 +203,39 @@ async def on_whop_email_text(
         )
         return
 
-    user = update.effective_user
-    found = storage.find_pending_claim_by_email(text)
-    if not found:
-        await update.message.reply_text(
-            claim_email_not_found(),
-            reply_markup=keyboards.back_only(),
-            parse_mode=ParseMode.MARKDOWN,
-        )
-        return
+    logger.info(
+        f"claim/email: tg={user.id} @{user.username} submitted email={text!r} | "
+        f"{storage.pending_claims_debug_summary()}"
+    )
 
-    code, claim = found
-    claim = storage.pop_pending_claim(code)
-    if not claim:
-        await update.message.reply_text(
-            claim_email_not_found(), parse_mode=ParseMode.MARKDOWN
+    found = storage.find_pending_claim_by_email(text)
+    if found:
+        code, claim = found
+        claim = storage.pop_pending_claim(code)
+        if not claim:
+            logger.error(f"claim/email: pop_pending_claim failed for code={code}")
+            await update.message.reply_text(
+                claim_email_not_found(), parse_mode=ParseMode.MARKDOWN
+            )
+            return
+        logger.info(f"claim/email: redeemed local pending code={code}")
+    else:
+        logger.warning("claim/email: no local pending — trying Whop API fallback")
+        resolved = await fetch_membership_by_email(text)
+        if not resolved or not resolved.get("whop_user_id"):
+            logger.error(f"claim/email: Whop API also found nothing for {text!r}")
+            await update.message.reply_text(
+                claim_email_not_found(),
+                reply_markup=keyboards.back_only(),
+                parse_mode=ParseMode.MARKDOWN,
+            )
+            return
+        code = new_claim_code()
+        claim = resolved
+        logger.info(
+            f"claim/email: Whop API resolved membership={claim.get('whop_membership_id')} "
+            f"synthetic_code={code}"
         )
-        return
 
     context.user_data.pop(USER_DATA_AWAITING_WHOP_EMAIL, None)
     await update.message.reply_text(CLAIM_SUCCESS, parse_mode=ParseMode.MARKDOWN)
@@ -201,10 +249,15 @@ async def on_whop_email_text(
         claim=claim,
     )
     if not outcome["grant"]["sent"]:
+        logger.error(
+            f"claim/email: grant_access failed for tg={user.id} links={outcome['grant'].get('links')}"
+        )
         await update.message.reply_text(
             "Membership linked, but invite links failed. Tap /start and contact /support.",
             parse_mode=ParseMode.MARKDOWN,
         )
+    else:
+        logger.success(f"claim/email: invite sent to tg={user.id} plan={outcome.get('plan_name')}")
 
     jobs.schedule_onboarding_reminder(context.application, user.id)
 

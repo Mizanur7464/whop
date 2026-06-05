@@ -62,7 +62,9 @@ def create_app() -> FastAPI:
         raw_body = await request.body()
 
         if not _verify_signature(raw_body, whop_signature):
-            logger.warning("Webhook signature verification failed")
+            logger.warning(
+                "Webhook signature verification FAILED — check WHOP_WEBHOOK_SECRET matches Whop dashboard"
+            )
             raise HTTPException(status_code=401, detail="invalid signature")
 
         try:
@@ -73,7 +75,21 @@ def create_app() -> FastAPI:
 
         event_type = payload.get("event") or payload.get("action") or "unknown"
         event_id = payload.get("id") or payload.get("event_id") or "—"
-        logger.info(f"Webhook received: {event_type} (id={event_id})")
+        entity = (
+            payload.get("data")
+            or payload.get("membership")
+            or payload.get("payment")
+            or {}
+        )
+        user_block = entity.get("user") if isinstance(entity.get("user"), dict) else {}
+        email_hint = (
+            entity.get("email")
+            or user_block.get("email")
+            or "—"
+        )
+        logger.info(
+            f"Webhook received: {event_type} (id={event_id}) email={email_hint}"
+        )
 
         # Fire-and-forget: respond fast, process async.
         background.add_task(whop_events.dispatch_event, payload)

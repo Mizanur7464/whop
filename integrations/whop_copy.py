@@ -50,6 +50,22 @@ def claim_email_not_found() -> str:
     )
 
 
+def claim_already_linked() -> str:
+    if is_free_access():
+        return (
+            "Your Whop access is *already linked* to this Telegram account.\n\n"
+            "• Group invite was sent here earlier — check this chat.\n"
+            "• Still setting up? Send `/onboarding`.\n"
+            "• Need help? Tap `/support`."
+        )
+    return (
+        "Your Whop membership is *already linked* to this Telegram account.\n\n"
+        "• Group invite was sent here earlier — check this chat.\n"
+        "• Still setting up? Send `/onboarding`.\n"
+        "• Need help? Tap `/support`."
+    )
+
+
 def claim_code_not_found() -> str:
     if is_free_access():
         return (

@@ -306,6 +306,15 @@ def link_whop_user(telegram_user_id: int, whop_user_id: str, **extra) -> dict:
         return user
 
 
+def has_whop_link(telegram_user_id: int) -> bool:
+    """True if this Telegram user already redeemed /claim (Whop linked)."""
+    user = get_user(telegram_user_id)
+    if not user:
+        return False
+    whop_id = user.get("whop_user_id")
+    return bool(whop_id and str(whop_id).strip())
+
+
 def get_telegram_id_for_whop_user(whop_user_id: str) -> Optional[int]:
     return _whop_to_tg.get(whop_user_id)
 
@@ -362,19 +371,35 @@ def _normalize_email(email: str) -> str:
     return email.strip().lower()
 
 
+def pending_claims_debug_summary() -> str:
+    """Compact log line of pending claims (emails only, no secrets)."""
+    if not _pending_claims:
+        return "pending_claims=0"
+    parts = []
+    for code, data in list(_pending_claims.items())[:10]:
+        em = data.get("email") or "—"
+        parts.append(f"{code}:{em}")
+    return f"pending_claims={len(_pending_claims)} [{', '.join(parts)}]"
+
+
 def find_pending_claim_by_email(email: str) -> Optional[tuple[str, dict]]:
     """Match Whop checkout email to a pending claim (newest first)."""
     target = _normalize_email(email)
     if not target or "@" not in target:
+        logger.warning(f"storage: find_pending_claim_by_email invalid target={email!r}")
         return None
+    logger.info(f"storage: find_pending_claim_by_email target={target!r} | {pending_claims_debug_summary()}")
     candidates = [
         (code, data)
         for code, data in _pending_claims.items()
         if _normalize_email(data.get("email") or "") == target
     ]
     if not candidates:
+        logger.warning(f"storage: no pending claim for email={target!r}")
         return None
     candidates.sort(key=lambda kv: kv[1].get("created_at", ""), reverse=True)
+    code, data = candidates[0]
+    logger.info(f"storage: pending claim found code={code} membership={data.get('whop_membership_id')}")
     return candidates[0]
 
 
