@@ -117,24 +117,26 @@ async def fulfill_claim(
         f"-> whop={whop_user_id} membership={claim['whop_membership_id']}"
     )
 
-    await airtable_sync.member_joined(
-        telegram_user_id=telegram_user_id,
-        telegram_username=username,
-        name=" ".join(p for p in [first_name, last_name] if p) or None,
-        whop_user_id=whop_user_id,
-        whop_membership_id=claim["whop_membership_id"],
-        plan=plan_name,
-    )
-
     result = await telegram_ops.grant_access(
         telegram_user_id, chats, plan_name=plan_name
     )
     try:
+        await airtable_sync.member_joined(
+            telegram_user_id=telegram_user_id,
+            telegram_username=username,
+            name=" ".join(p for p in [first_name, last_name] if p) or None,
+            whop_user_id=whop_user_id,
+            whop_membership_id=claim["whop_membership_id"],
+            plan=plan_name,
+        )
+    except Exception as e:
+        logger.warning(f"fulfill_claim: Airtable sync failed for tg={telegram_user_id}: {e}")
+    try:
         await refresh_commands_for_user(
             telegram_ops.bot(), telegram_user_id
         )
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"fulfill_claim: refresh commands failed for tg={telegram_user_id}: {e}")
     return {"plan_name": plan_name, "grant": result}
 
 

@@ -11,7 +11,8 @@ from bot.decorators import is_admin
 from bot.main_group_access import needs_claim_only_menu, refresh_commands_for_user
 from integrations.whop_copy import claim_only_command_hint
 
-_ALLOWED_BEFORE_MAIN = frozenset({"claim", "start"})
+# onboarding runs its own main-group check and always replies
+_ALLOWED_BEFORE_MAIN = frozenset({"claim", "start", "onboarding", "welcome"})
 
 
 async def block_until_main_group(
@@ -36,9 +37,21 @@ async def block_until_main_group(
     if not await needs_claim_only_menu(context.bot, user.id):
         return False
 
-    await refresh_commands_for_user(context.bot, user.id)
-    await update.message.reply_text(
-        claim_only_command_hint(),
-        parse_mode=ParseMode.MARKDOWN,
-    )
+    try:
+        await refresh_commands_for_user(context.bot, user.id)
+        await update.message.reply_text(
+            claim_only_command_hint(),
+            parse_mode=ParseMode.MARKDOWN,
+        )
+    except Exception as e:
+        from loguru import logger
+
+        logger.warning(f"command_gate: could not reply to {user.id}: {e}")
+        try:
+            await update.message.reply_text(
+                claim_only_command_hint().replace("*", ""),
+                parse_mode=None,
+            )
+        except Exception:
+            pass
     return True

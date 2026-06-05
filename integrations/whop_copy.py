@@ -64,6 +64,14 @@ def claim_email_not_found() -> str:
     )
 
 
+def join_main_before_onboarding_hint() -> str:
+    return (
+        "Please join the *main community group* first "
+        "(use the invite link in this chat).\n\n"
+        "After you have joined, send `/onboarding` again."
+    )
+
+
 def claim_only_command_hint() -> str:
     if is_free_access():
         return (
