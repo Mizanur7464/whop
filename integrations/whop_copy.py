@@ -33,18 +33,15 @@ def claim_email_prompt() -> str:
 def claim_success_message() -> str:
     return (
         "Your membership is linked.\n\n"
-        "Check this chat for the group link and join the group. "
-        "After you have done that, come back and enter `/onboarding` "
-        "to gain access to the channels in the community."
+        "Check this chat for your group invite link. Join the main group "
+        "through the link below. After you have done that come back to "
+        "this chat and command `/onboarding` to finish the onboarding steps "
+        "and get full access to all the channels in our main group."
     )
 
 
 def claim_invite_message(invite_url: str) -> str:
-    return (
-        "🎉 Your main group invite (one-time use):\n"
-        f"{invite_url}\n\n"
-        f"{grant_access_invite_footer()}"
-    )
+    return f"🎉 Your main group invite:\n{invite_url}"
 
 
 def claim_invite_failed_message() -> str:
