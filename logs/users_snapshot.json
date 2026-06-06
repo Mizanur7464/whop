@@ -56,5 +56,18 @@
     "screenshot_file_id": null,
     "terms_accepted_at": null,
     "terms_accepted": false
+  },
+  "999999002": {
+    "user_id": 999999002,
+    "joined_at": "2026-06-05T20:01:27.330576+00:00",
+    "status": "active",
+    "plan": "unknown",
+    "checklist": {},
+    "whop_user_id": "user_99Z0EudYzCCLR",
+    "whop_membership_id": "mem_UAItdwxkvtnbLQ",
+    "username": "t",
+    "first_name": "T",
+    "last_name": "U",
+    "updated_at": "2026-06-05T20:01:27.330576+00:00"
   }
 }

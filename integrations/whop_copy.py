@@ -171,9 +171,10 @@ def success_page_subtitle() -> str:
 
 
 def success_page_preparing() -> str:
-    if is_free_access():
-        return "Preparing your Telegram group invite…"
-    return "Preparing your Telegram group invite…"
+    return (
+        "Preparing your telegram group invite. "
+        "This can take 1-2 minutes, don't close this screen"
+    )
 
 
 def success_page_invite_heading() -> str:
