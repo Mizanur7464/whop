@@ -69,8 +69,8 @@ class OnboardingConfig(BaseModel):
         "You will receive a notification when access has been granted."
     )
     approved_message: str = (
-        "You are approved. Check this chat for your main group invite link. "
-        "Welcome to the full Fusion Wealth community."
+        "You are approved. Welcome to Fusion Strategy. "
+        "You now have access to the full community. Click the link below."
     )
     idle_after_complete_message: str = (
         "You're all set — onboarding is complete. "

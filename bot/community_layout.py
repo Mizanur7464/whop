@@ -140,5 +140,8 @@ def unlock_topic_flows() -> list[str]:
 
 
 def build_unlock_dm_text() -> str:
-    """Short approval DM before the invite link (buyer: no topic list in the middle)."""
-    return "You now have access to the full Fusion Strategy community."
+    """Approval DM body shown above the main group invite link."""
+    return (
+        "You are approved. Welcome to Fusion Strategy. "
+        "You now have access to the full community. Click the link below."
+    )

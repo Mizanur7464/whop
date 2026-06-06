@@ -37,10 +37,10 @@ def claim_email_prompt() -> str:
 def claim_success_message() -> str:
     return (
         "Your membership is linked.\n\n"
-        "Send `/onboarding` now to complete the welcome steps and "
-        "submit your screenshot.\n\n"
-        "After our team approves, we will send your *main group invite* "
-        "here in this chat."
+        "Send /onboarding now to complete the steps to get access to our "
+        "main community.\n\n"
+        "After our team approves we will send you the main group invite "
+        "link here in the chat"
     )
 
 

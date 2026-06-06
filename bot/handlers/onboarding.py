@@ -513,14 +513,6 @@ async def _admin_approve(
     await airtable_sync.onboarding_completed(target_user_id)
     await unlock_for_user(target_user_id)
 
-    cfg = onboarding_config.get()
-    await safe_send_message(
-        context.bot,
-        target_user_id,
-        cfg.approved_message,
-        parse_mode=ParseMode.MARKDOWN,
-    )
-
     await update.callback_query.answer("Approved ✅ — user unlocked")
     try:
         who = html.escape(admin.username or str(admin.id))
