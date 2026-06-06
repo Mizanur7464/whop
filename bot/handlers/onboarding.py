@@ -27,7 +27,12 @@ from bot.decorators import log_call
 from bot.channel_context import block_if_group_chat, ensure_welcome_context
 from bot.community_layout import FLOW_WELCOME
 from bot.messaging import send_document, send_text
-from bot.telegram_utils import safe_answer_callback
+from bot.telegram_utils import (
+    escape_markdown,
+    is_markdown_parse_error,
+    safe_reply_text,
+    safe_send_message,
+)
 from bot import terms_config
 from bot.welcome_docs import location_by_id, get as get_welcome_docs
 
@@ -60,6 +65,10 @@ async def _send_or_edit(
         parse_mode=ParseMode.MARKDOWN,
         disable_web_page_preview=True,
     )
+
+    async def _send_plain(msg) -> None:
+        await safe_reply_text(msg, text, reply_markup=markup, parse_mode=ParseMode.MARKDOWN)
+
     if update.callback_query:
         try:
             await update.callback_query.edit_message_text(
@@ -69,15 +78,19 @@ async def _send_or_edit(
             err = str(e).lower()
             if "not modified" in err:
                 return
-            # Stale inline buttons / edit failed — send a fresh message instead.
+            if is_markdown_parse_error(e):
+                try:
+                    await update.callback_query.edit_message_text(
+                        text, reply_markup=markup, parse_mode=None
+                    )
+                    return
+                except BadRequest:
+                    pass
             logger.warning(f"edit_message failed ({e}); sending new message")
-            await update.callback_query.message.reply_text(
-                text, reply_markup=markup, **parse_kwargs
-            )
-    else:
-        await update.effective_message.reply_text(
-            text, reply_markup=markup, **parse_kwargs
-        )
+            if update.callback_query.message:
+                await _send_plain(update.callback_query.message)
+    elif update.effective_message:
+        await _send_plain(update.effective_message)
 
 
 async def _send_new_message(
@@ -323,11 +336,10 @@ async def show_contact_intro(
         return
 
     cfg = onboarding_config.get()
-    uname = (
-        f"@{user.username}"
-        if user.username
-        else "_not set — please set a username in Telegram_"
-    )
+    if user.username:
+        uname = escape_markdown(f"@{user.username}")
+    else:
+        uname = "not set — please set a username in Telegram settings first"
     text = (
         _msg(
             cfg.contact_intro_message,
@@ -371,8 +383,8 @@ async def on_onboarding_contact_text(
             telegram_username=user.username,
         )
         context.user_data[CONTACT_STEP_KEY] = "phone"
-        await update.message.reply_text(
-            cfg.contact_phone_prompt, parse_mode=ParseMode.MARKDOWN
+        await safe_reply_text(
+            update.message, cfg.contact_phone_prompt, parse_mode=ParseMode.MARKDOWN
         )
         return
 
@@ -401,7 +413,8 @@ async def on_onboarding_contact_text(
                 ]
             ]
         )
-        await update.message.reply_text(
+        await safe_reply_text(
+            update.message,
             cfg.contact_saved_message,
             reply_markup=markup,
             parse_mode=ParseMode.MARKDOWN,
@@ -469,7 +482,8 @@ async def on_screenshot_photo(
     )
 
     cfg = onboarding_config.get()
-    await update.message.reply_text(
+    await safe_reply_text(
+        update.message,
         cfg.pending_review_message,
         parse_mode=ParseMode.MARKDOWN,
     )
@@ -499,14 +513,12 @@ async def _admin_approve(
     await unlock_for_user(target_user_id)
 
     cfg = onboarding_config.get()
-    try:
-        await context.bot.send_message(
-            chat_id=target_user_id,
-            text=cfg.approved_message,
-            parse_mode=ParseMode.MARKDOWN,
-        )
-    except Exception as e:
-        logger.warning(f"Could not DM approved user {target_user_id}: {e}")
+    await safe_send_message(
+        context.bot,
+        target_user_id,
+        cfg.approved_message,
+        parse_mode=ParseMode.MARKDOWN,
+    )
 
     await update.callback_query.answer("Approved ✅ — user unlocked")
     try:
@@ -548,14 +560,12 @@ async def _admin_reject(
     reason = (
         "The screenshot wasn't clear enough or didn't show a linked trading account."
     )
-    try:
-        await context.bot.send_message(
-            chat_id=target_user_id,
-            text=cfg.rejected_message.format(reason=reason),
-            parse_mode=ParseMode.MARKDOWN,
-        )
-    except Exception as e:
-        logger.warning(f"Could not DM rejected user {target_user_id}: {e}")
+    await safe_send_message(
+        context.bot,
+        target_user_id,
+        cfg.rejected_message.format(reason=escape_markdown(reason)),
+        parse_mode=ParseMode.MARKDOWN,
+    )
 
     await update.callback_query.answer("Rejected — user asked to resubmit")
     try:

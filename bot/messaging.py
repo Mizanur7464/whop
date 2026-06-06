@@ -8,6 +8,7 @@ from telegram.error import BadRequest
 from telegram.ext import ContextTypes
 
 from bot.community_layout import message_thread_kwargs
+from bot.telegram_utils import is_markdown_parse_error
 
 
 def chat_id(update: Update) -> int:
@@ -26,27 +27,34 @@ async def send_text(
 ) -> None:
     if not update.effective_chat:
         return
-    kwargs = message_thread_kwargs(update, flow)
-    try:
+    thread_kwargs = message_thread_kwargs(update, flow)
+    cid = chat_id(update)
+
+    async def _attempt(
+        *,
+        mode: str | None = parse_mode,
+        extra: dict | None = None,
+    ) -> None:
         await context.bot.send_message(
-            chat_id=chat_id(update),
+            chat_id=cid,
             text=text,
             reply_markup=markup,
-            parse_mode=parse_mode,
+            parse_mode=mode,
             disable_web_page_preview=disable_preview,
-            **kwargs,
+            **(extra if extra is not None else thread_kwargs),
         )
+
+    try:
+        await _attempt()
     except BadRequest as e:
-        if "thread not found" in str(e).lower() and kwargs:
-            await context.bot.send_message(
-                chat_id=chat_id(update),
-                text=text,
-                reply_markup=markup,
-                parse_mode=parse_mode,
-                disable_web_page_preview=disable_preview,
-            )
-        else:
-            raise
+        err = str(e).lower()
+        if thread_kwargs and "thread not found" in err:
+            await _attempt(extra={})
+            return
+        if parse_mode is not None and is_markdown_parse_error(e):
+            await _attempt(mode=None)
+            return
+        raise
 
 
 async def send_document(

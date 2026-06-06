@@ -16,6 +16,38 @@ def is_stale_callback_error(err: BaseException) -> bool:
     return "query is too old" in msg or "query id is invalid" in msg
 
 
+def is_markdown_parse_error(err: BaseException) -> bool:
+    if not isinstance(err, BadRequest):
+        return False
+    msg = str(err).lower()
+    return "can't parse entities" in msg or "parse" in msg
+
+
+def escape_markdown(text: str) -> str:
+    """Escape dynamic text for Telegram legacy Markdown."""
+    if not text:
+        return text
+    for ch in ("\\", "_", "*", "`", "["):
+        text = text.replace(ch, f"\\{ch}")
+    return text
+
+
+async def safe_reply_text(message, text: str, **kwargs) -> Message | None:
+    """reply_text with Markdown fallback to plain text."""
+    parse_mode = kwargs.pop("parse_mode", ParseMode.MARKDOWN)
+    try:
+        return await message.reply_text(text, parse_mode=parse_mode, **kwargs)
+    except BadRequest as e:
+        if parse_mode is not None and is_markdown_parse_error(e):
+            logger.debug(f"safe_reply: retry without parse_mode: {e}")
+            try:
+                return await message.reply_text(text, parse_mode=None, **kwargs)
+            except BadRequest as e2:
+                logger.error(f"safe_reply: plain reply failed: {e2}")
+                return None
+        raise
+
+
 async def safe_send_message(
     bot: Bot,
     chat_id: int,
@@ -31,9 +63,7 @@ async def safe_send_message(
         )
     except (BadRequest, TelegramError) as e:
         err = str(e).lower()
-        if parse_mode is not None and (
-            "can't parse entities" in err or "parse" in err
-        ):
+        if parse_mode is not None and is_markdown_parse_error(e):
             logger.debug(f"safe_send: retry without parse_mode to {chat_id}")
             try:
                 return await bot.send_message(
