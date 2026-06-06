@@ -23,24 +23,24 @@ def claim_email_prompt() -> str:
         return (
             "Thanks for registering for Fusion Strategy through Whop.\n\n"
             "Reply with the *email address* you used there "
-            "(one message). We will link your access and send your "
-            "Telegram group invite here."
+            "(one message). We will link your access, then you can "
+            "complete `/onboarding` in this chat."
         )
     return (
         "Thanks for registering for Fusion Strategy through Whop.\n\n"
         "Reply with the *email address* you used at checkout "
-        "(one message). We will link your membership and send your "
-        "Telegram group invite here."
+        "(one message). We will link your membership, then you can "
+        "complete `/onboarding` in this chat."
     )
 
 
 def claim_success_message() -> str:
     return (
         "Your membership is linked.\n\n"
-        "Check this chat for your group invite link. Join the main group "
-        "through the link below. After you have done that come back to "
-        "this chat and command `/onboarding` to finish the onboarding steps "
-        "and get full access to all the channels in our main group."
+        "Send `/onboarding` now to complete the welcome steps and "
+        "submit your screenshot.\n\n"
+        "After our team approves, we will send your *main group invite* "
+        "here in this chat."
     )
 
 
@@ -82,22 +82,16 @@ def claim_email_not_found() -> str:
 
 def join_main_before_onboarding_hint() -> str:
     return (
-        "Please join the *main community group* first "
-        "(use the invite link in this chat).\n\n"
-        "After you have joined, send `/onboarding` again."
+        "Please send `/onboarding` first to complete welcome setup.\n\n"
+        "After admin approval we will send your main group invite here."
     )
 
 
 def claim_only_command_hint() -> str:
-    if is_free_access():
-        return (
-            "Join the *main community* first using the invite link we sent here.\n\n"
-            "Until you're in that group, only `/claim` is available "
-            "(link your Whop registration)."
-        )
     return (
-        "Join the *main community* first using the invite link we sent here.\n\n"
-        "Until you're in that group, only `/claim` is available."
+        "Complete `/onboarding` first.\n\n"
+        "Until you are approved, only `/start`, `/claim`, and `/onboarding` "
+        "are available. Your main group invite comes after approval."
     )
 
 
@@ -105,14 +99,14 @@ def claim_already_linked() -> str:
     if is_free_access():
         return (
             "Your Whop access is *already linked* to this Telegram account.\n\n"
-            "• Group invite was sent here earlier — check this chat.\n"
-            "• Still setting up? Send `/onboarding`.\n"
+            "• Send `/onboarding` to continue setup.\n"
+            "• Main group invite is sent *after* admin approval.\n"
             "• Need help? Tap `/support`."
         )
     return (
         "Your Whop membership is *already linked* to this Telegram account.\n\n"
-        "• Group invite was sent here earlier — check this chat.\n"
-        "• Still setting up? Send `/onboarding`.\n"
+        "• Send `/onboarding` to continue setup.\n"
+        "• Main group invite is sent *after* admin approval.\n"
         "• Need help? Tap `/support`."
     )
 
@@ -172,8 +166,15 @@ def success_page_subtitle() -> str:
 
 def success_page_preparing() -> str:
     return (
-        "Preparing your telegram group invite. "
+        "Linking your Whop registration. "
         "This can take 1-2 minutes, don't close this screen"
+    )
+
+
+def success_page_ready_message() -> str:
+    return (
+        "You're registered. Open our Telegram bot and send /onboarding "
+        "to complete setup. Your main group invite will be sent after we approve."
     )
 
 

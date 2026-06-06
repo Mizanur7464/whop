@@ -24,12 +24,12 @@ from integrations.whop_copy import (
     success_page_invite_heading,
     success_page_invite_hint,
     success_page_preparing,
+    success_page_ready_message,
     success_page_still_processing,
     success_page_subtitle,
     success_page_title,
     success_page_wait_hint,
 )
-from integrations.whop_success_invites import ensure_pending_claim_invite_links
 
 SUCCESS_PATH = "/whop/success"
 STATUS_PATH = "/api/claim/status"
@@ -203,17 +203,11 @@ async def lookup_claim_status_async(
         f"success_page/status: found claim code={claim_code} "
         f"membership={data.get('whop_membership_id')} email={data.get('email')}"
     )
-    try:
-        invite_links = await ensure_pending_claim_invite_links(claim_code, data)
-    except Exception as e:
-        logger.exception(f"success_page/status: invite generation failed: {e}")
-        invite_links = []
-    primary = invite_links[0]["url"] if invite_links else None
-    payload["invite_links"] = invite_links
-    payload["primary_invite_url"] = primary
+    payload["invite_links"] = []
+    payload["primary_invite_url"] = None
     logger.info(
-        f"success_page/status: ready code={claim_code} invites={len(invite_links)} "
-        f"primary={'yes' if primary else 'no'}"
+        f"success_page/status: ready code={claim_code} "
+        f"(invite deferred until onboarding approval)"
     )
     return payload
 
@@ -305,6 +299,11 @@ def render_success_html(query_params: dict[str, str]) -> str:
       <a class="btn-secondary" id="bot-btn-invite" href="{claim_url}" target="_blank" rel="noopener">Open bot for onboarding</a>
     </div>
 
+    <div id="ready-onboarding" class="hidden">
+      <p class="sub">{escape(success_page_ready_message())}</p>
+      <a class="btn" id="bot-btn-onboarding" href="{claim_url}" target="_blank" rel="noopener">Open Telegram bot</a>
+    </div>
+
     <div id="ready-code" class="hidden">
       <p class="sub">Your activation code</p>
       <div class="code-box" id="code">--------</div>
@@ -325,7 +324,7 @@ def render_success_html(query_params: dict[str, str]) -> str:
     let attempts = 0;
 
     function show(id) {{
-      ["loading", "ready-invite", "ready-code", "wait"].forEach(s => {{
+      ["loading", "ready-invite", "ready-onboarding", "ready-code", "wait"].forEach(s => {{
         const el = document.getElementById(s);
         if (el) el.classList.toggle("hidden", s !== id);
       }});
@@ -364,13 +363,12 @@ def render_success_html(query_params: dict[str, str]) -> str:
             show("ready-invite");
             return;
           }}
-          if (data.code) {{
-            document.getElementById("code").textContent = data.code;
-            document.getElementById("claim-cmd").textContent = data.claim_command || ("/claim " + data.code);
-            if (data.claim_url) document.getElementById("bot-btn").href = data.claim_url;
-            show("ready-code");
-            return;
+          if (data.claim_url) {{
+            const obBtn = document.getElementById("bot-btn-onboarding");
+            if (obBtn) obBtn.href = data.claim_url;
           }}
+          show("ready-onboarding");
+          return;
         }}
       }} catch (e) {{}}
       if (attempts >= maxAttempts) {{

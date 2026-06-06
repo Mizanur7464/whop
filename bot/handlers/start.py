@@ -15,7 +15,6 @@ from bot.decorators import is_admin, log_call
 from bot.main_group_access import (
     needs_claim_only_menu,
     refresh_commands_for_user,
-    user_in_main_group,
 )
 from bot.handlers import claim, copy_trading, onboarding, support_channel
 from integrations.whop_copy import join_main_before_onboarding_hint
@@ -64,14 +63,8 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                     parse_mode=ParseMode.MARKDOWN,
                 )
                 return
-            if await user_in_main_group(context.bot, user.id):
-                await onboarding.show_welcome(update, context)
-                jobs.schedule_onboarding_reminder(context.application, user.id)
-            else:
-                await update.message.reply_text(
-                    join_main_before_onboarding_hint(),
-                    parse_mode=ParseMode.MARKDOWN,
-                )
+            await onboarding.show_welcome(update, context)
+            jobs.schedule_onboarding_reminder(context.application, user.id)
             return
 
     if payload in ("paid", "whop", "activate", "claim"):

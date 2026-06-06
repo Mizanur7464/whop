@@ -229,21 +229,17 @@ async def on_membership_valid(payload: dict) -> None:
         payment_id=payment_ref,
         receipt_id=payment_ref,
     )
-    from integrations.whop_success_invites import ensure_pending_claim_invite_links
-
-    claim_data = storage.find_pending_claim_by_code(code)
-    if claim_data:
-        _, data = claim_data
-        await ensure_pending_claim_invite_links(code, data)
     if not checkout_email:
         logger.warning(
             f"Pending claim {code} has no email in webhook — "
             "user should use /whop/success or /claim CODE"
         )
-    logger.info(
-        f"Created pending claim {code} for whop_user={whop_user} "
-        f"membership={membership_id} email={checkout_email or '—'}"
-    )
+    else:
+        logger.info(
+            f"Created pending claim {code} for whop_user={whop_user} "
+            f"membership={membership_id} email={checkout_email} "
+            f"(main group invite after onboarding approval)"
+        )
 
     from integrations.whop_success_page import public_app_base_url
 

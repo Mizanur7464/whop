@@ -41,6 +41,7 @@ PRIVATE_COMMANDS = MEMBER_DM_COMMANDS
 
 CLAIM_ONLY_COMMANDS: list[BotCommand] = [
     BotCommand("claim", "Link your Whop access"),
+    BotCommand("onboarding", "Complete welcome onboarding"),
 ]
 
 WELCOME_CHANNEL_COMMANDS: list[BotCommand] = [

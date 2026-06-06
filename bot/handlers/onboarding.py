@@ -25,8 +25,6 @@ from bot.community_unlock import unlock_for_user
 from bot import jobs, keyboards, onboarding_config, storage
 from bot.decorators import log_call
 from bot.channel_context import block_if_group_chat, ensure_welcome_context
-from bot.main_group_access import needs_claim_only_menu
-from integrations.whop_copy import join_main_before_onboarding_hint
 from bot.community_layout import FLOW_WELCOME
 from bot.messaging import send_document, send_text
 from bot.telegram_utils import safe_answer_callback
@@ -636,11 +634,7 @@ async def cmd_onboarding(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
 
     user = update.effective_user
-    if user and await needs_claim_only_menu(context.bot, user.id):
-        await update.message.reply_text(
-            join_main_before_onboarding_hint(),
-            parse_mode=ParseMode.MARKDOWN,
-        )
+    if not user:
         return
     storage.upsert_user(
         user.id,

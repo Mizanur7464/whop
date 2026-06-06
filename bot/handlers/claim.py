@@ -29,7 +29,6 @@ from bot.telegram_utils import safe_send_message
 from config import settings
 from integrations import plan_mapping, telegram_ops
 from integrations.whop_claim_resolve import fetch_membership_by_email, new_claim_code
-from integrations.whop_success_invites import primary_invite_url
 from integrations.whop_copy import (
     claim_already_linked,
     claim_code_not_found,
@@ -142,7 +141,6 @@ async def fulfill_claim(
     whop_user_id = claim["whop_user_id"]
     product_id = claim.get("product_id")
     plan_name = plan_mapping.resolve_plan_name(product_id)
-    chats = plan_mapping.resolve_chats_for_product(product_id)
 
     storage.clear_awaiting_claim_email(telegram_user_id)
     storage.link_whop_user(
@@ -158,59 +156,17 @@ async def fulfill_claim(
 
     logger.info(
         f"Claim {code} linked tg={telegram_user_id} (@{username}) "
-        f"-> whop={whop_user_id} membership={claim['whop_membership_id']}"
+        f"-> whop={whop_user_id} membership={claim['whop_membership_id']} "
+        f"(main group invite deferred until onboarding approval)"
     )
 
-    invite_url: str | None = primary_invite_url(claim)
-    if invite_url:
-        logger.info(
-            f"fulfill_claim: using pre-generated invite for tg={telegram_user_id}"
-        )
-    elif bot is not None:
-        try:
-            invite_url = await asyncio.wait_for(
-                telegram_ops.create_main_group_invite(
-                    name=f"claim-{code}-{telegram_user_id}",
-                    bot_instance=bot,
-                ),
-                timeout=12.0,
-            )
-        except asyncio.TimeoutError:
-            logger.error(
-                f"fulfill_claim: invite link timed out for tg={telegram_user_id}"
-            )
-    else:
-        try:
-            invite_url = await asyncio.wait_for(
-                telegram_ops.create_main_group_invite(
-                    name=f"claim-{code}-{telegram_user_id}"
-                ),
-                timeout=12.0,
-            )
-        except asyncio.TimeoutError:
-            logger.error(
-                f"fulfill_claim: invite link timed out for tg={telegram_user_id}"
-            )
-    if not invite_url and chats:
-        logger.warning(
-            f"fulfill_claim: main invite failed, trying plan chats for tg={telegram_user_id}"
-        )
-        try:
-            links = await asyncio.wait_for(
-                telegram_ops.build_invite_link_list(chats, plan_name=plan_name),
-                timeout=12.0,
-            )
-            if links:
-                invite_url = links[0].get("url")
-        except asyncio.TimeoutError:
-            logger.error(f"fulfill_claim: fallback invite timed out tg={telegram_user_id}")
+    # Main group invite is sent after admin approves onboarding (unlock_for_user).
+    invite_url: str | None = None
 
     result = {
-        "sent": bool(invite_url),
-        "links": {settings.telegram_main_group_id: invite_url}
-        if settings.telegram_main_group_id
-        else {},
-        "invite_url": invite_url,
+        "sent": False,
+        "links": {},
+        "invite_url": None,
     }
 
     async def _deferred_sync() -> None:
@@ -263,18 +219,6 @@ async def _send_claim_outcome_to_chat(
         ):
             sent_any = True
         logger.success(f"claim: invite link sent in-chat for tg={telegram_user_id}")
-    else:
-        logger.error(
-            f"claim: no invite URL for tg={telegram_user_id} "
-            f"main_group={settings.telegram_main_group_id}"
-        )
-        if await safe_send_message(
-            bot,
-            chat_id,
-            claim_invite_failed_message(),
-            parse_mode=ParseMode.MARKDOWN,
-        ):
-            sent_any = True
     return sent_any
 
 
