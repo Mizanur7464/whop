@@ -30,6 +30,7 @@ from bot.messaging import send_document, send_text
 from bot.telegram_utils import (
     escape_markdown,
     is_markdown_parse_error,
+    safe_answer_callback,
     safe_reply_text,
     safe_send_message,
 )
