@@ -187,14 +187,17 @@ def build_app() -> Application:
             block=True,
         )
     )
-    if settings.telegram_main_group_id:
-        main_group = filters.Chat(chat_id=settings.telegram_main_group_id)
+    if settings.telegram_main_group_id or settings.telegram_welcome_group_id:
         app.add_handler(
             ChatMemberHandler(
                 leave_survey.on_chat_member,
                 ChatMemberHandler.CHAT_MEMBER,
             )
         )
+        logger.info("Leave survey ON for configured community groups")
+
+    if settings.telegram_main_group_id:
+        main_group = filters.Chat(chat_id=settings.telegram_main_group_id)
         app.add_handler(
             ChatMemberHandler(
                 on_user_joined_main_group,

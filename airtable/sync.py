@@ -214,11 +214,13 @@ async def member_left_group(
     name: str | None,
     reason: str,
     left_at_iso: str,
+    group_name: str | None = None,
 ) -> None:
     c = client()
     if not c.enabled:
         return
-    note = f"Left group at {left_at_iso}: {reason}"
+    where = group_name or "group"
+    note = f"Left {where} at {left_at_iso}: {reason}"
     try:
         await c.append_member_note(
             telegram_user_id,
