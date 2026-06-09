@@ -42,6 +42,7 @@ async def member_joined(
     whop_user_id: str | None,
     whop_membership_id: str | None,
     plan: str | None,
+    email: str | None = None,
 ) -> None:
     """Called when a user successfully claims their Whop purchase."""
     c = client()
@@ -57,8 +58,11 @@ async def member_joined(
             plan=plan,
             status=MemberStatus.ACTIVE,
             join_date=datetime.now(timezone.utc).isoformat(),
+            email=email,
         )
-        logger.info(f"Airtable: member_joined tg={telegram_user_id} plan={plan}")
+        logger.info(
+            f"Airtable: member_joined tg={telegram_user_id} plan={plan} email={email!r}"
+        )
     except Exception as e:
         logger.warning(f"Airtable member_joined failed: {e}")
 
@@ -114,6 +118,7 @@ async def onboarding_completed(
     phone: str | None = None,
     platform: str | None = None,
     platform_user_id: str | None = None,
+    name: str | None = None,
 ) -> None:
     c = client()
     if not c.enabled:
@@ -125,6 +130,7 @@ async def onboarding_completed(
             phone=phone,
             platform=platform,
             platform_user_id=platform_user_id,
+            name=name,
         )
         logger.info(f"Airtable: onboarding done tg={telegram_user_id}")
     except Exception as e:

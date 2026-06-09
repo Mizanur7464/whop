@@ -42,6 +42,7 @@ CONTACT_STEP_KEY = "onboarding_contact_step"
 
 def onboarding_contact_active(_: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     return context.user_data.get(CONTACT_STEP_KEY) in (
+        "full_name",
         "email",
         "phone",
         "platform_user_id",
@@ -336,8 +337,11 @@ async def show_contact_intro(
     """Collect email, phone, and confirm Telegram ID before T&C."""
     user = update.effective_user
     record = storage.get_user(user.id) or {}
-    if record.get("contact_email") and record.get("contact_phone") and record.get(
-        "platform_user_id"
+    if (
+        record.get("contact_full_name")
+        and record.get("contact_email")
+        and record.get("contact_phone")
+        and record.get("platform_user_id")
     ):
         await show_terms(update, context)
         return
@@ -354,9 +358,9 @@ async def show_contact_intro(
             telegram_username=uname,
         )
         + "\n\n"
-        + cfg.contact_email_prompt
+        + cfg.contact_full_name_prompt
     )
-    context.user_data[CONTACT_STEP_KEY] = "email"
+    context.user_data[CONTACT_STEP_KEY] = "full_name"
     if update.callback_query:
         await update.callback_query.answer()
     await _send_new_message(update, context, text, None)
@@ -378,6 +382,25 @@ async def on_onboarding_contact_text(
 
     cfg = onboarding_config.get()
     step = context.user_data.get(CONTACT_STEP_KEY)
+
+    if step == "full_name":
+        if len(text.split()) < 2 or len(text) < 3:
+            await update.message.reply_text(
+                "Please send your *full name* (first and last name).",
+                parse_mode=ParseMode.MARKDOWN,
+            )
+            return
+        storage.upsert_user(
+            user.id,
+            contact_full_name=text,
+            contact_telegram_id=user.id,
+            telegram_username=user.username,
+        )
+        context.user_data[CONTACT_STEP_KEY] = "email"
+        await safe_reply_text(
+            update.message, cfg.contact_email_prompt, parse_mode=ParseMode.MARKDOWN
+        )
+        return
 
     if step == "email":
         if "@" not in text or len(text) < 5:
@@ -425,7 +448,7 @@ async def on_onboarding_contact_text(
         await airtable_sync.member_contact_collected(
             telegram_user_id=user.id,
             telegram_username=user.username,
-            name=user.full_name,
+            name=record.get("contact_full_name") or user.full_name,
             email=record.get("contact_email", ""),
             phone=record.get("contact_phone", ""),
             platform=record.get("platform"),
@@ -541,6 +564,7 @@ async def _admin_approve(
     await airtable_sync.onboarding_completed(
         target_user_id,
         plan=plan,
+        name=local_user.get("contact_full_name"),
         phone=local_user.get("contact_phone"),
         platform=local_user.get("platform"),
         platform_user_id=local_user.get("platform_user_id"),
@@ -718,9 +742,7 @@ def _telegram_username_line(user) -> str:
 
 def _review_caption_html(user, record: dict) -> str:
     """Admin review caption — HTML avoids Markdown breaking on @ symbols."""
-    name = html.escape(
-        " ".join(p for p in [user.first_name, user.last_name] if p) or "—"
-    )
+    name = html.escape(str(record.get("contact_full_name") or user.full_name or "—"))
     username = html.escape(_telegram_username_line(user))
     location = html.escape(str(record.get("location", "—")))
     platform = html.escape(str(record.get("platform", "—")))

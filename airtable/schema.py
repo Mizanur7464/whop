@@ -160,9 +160,9 @@ ALL_TABLES = {
         MembersField.STATUS,
         MembersField.JOIN_DATE,
     ],
-    "finance": [
-        FinanceField.ENTRY_ID,
-        FinanceField.TYPE,
+        "finance": [
+            FinanceField.ENTRY_ID,
+            FinanceField.TYPE,
         FinanceField.AMOUNT,
         FinanceField.FEES,
         FinanceField.NET_AMOUNT,

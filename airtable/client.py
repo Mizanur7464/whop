@@ -306,6 +306,7 @@ class AirtableClient:
         phone: str | None = None,
         platform: str | None = None,
         platform_user_id: str | None = None,
+        name: str | None = None,
     ) -> Optional[dict]:
         if not self.enabled:
             return None
@@ -323,6 +324,8 @@ class AirtableClient:
         plan_value = self._plan_field(plan)
         if plan_value:
             fields[MembersField.PLAN] = plan_value
+        if name:
+            fields[MembersField.NAME] = name.strip()
         if phone:
             fields[MembersField.PHONE] = phone
         platform_value = normalize_trading_platform(platform)
@@ -341,6 +344,16 @@ class AirtableClient:
         return rec["id"] if rec else None
 
     # ---------- Finance (payments + expenses in one table) ----------
+
+    @staticmethod
+    def _finance_entry_id_field() -> str:
+        """Support using the legacy ``Payments`` table as the unified finance table."""
+        if (
+            settings.airtable_finance_table.strip().lower()
+            == settings.airtable_payments_table.strip().lower()
+        ):
+            return "Payment ID"
+        return FinanceField.ENTRY_ID
 
     async def record_finance_entry(
         self,
@@ -369,8 +382,9 @@ class AirtableClient:
             if isinstance(entry_type, FinanceType)
             else str(entry_type)
         )
+        entry_id_field = self._finance_entry_id_field()
         fields: dict[str, Any] = {
-            FinanceField.ENTRY_ID: entry_id,
+            entry_id_field: entry_id,
             FinanceField.TYPE: type_value,
             **self._money_fields(amount=amount, fees=fees, net_amount=net_amount),
             FinanceField.CURRENCY: normalize_currency(currency),
@@ -403,7 +417,7 @@ class AirtableClient:
 
         table = self._table(settings.airtable_finance_table)
         existing = await self._run(
-            table.first, formula=match({FinanceField.ENTRY_ID: entry_id})
+            table.first, formula=match({entry_id_field: entry_id})
         )
         if existing:
             return await self._run(table.update, existing["id"], fields)
@@ -608,6 +622,9 @@ class AirtableClient:
                     continue
                 present = set((sample.get("fields") or {}).keys())
                 missing = [f for f in required if f not in present]
+                if short == "finance":
+                    if FinanceField.ENTRY_ID in missing and "Payment ID" in present:
+                        missing.remove(FinanceField.ENTRY_ID)
                 results[short] = {
                     "ok": not missing,
                     "table": table_name,

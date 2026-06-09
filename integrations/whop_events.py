@@ -214,6 +214,7 @@ async def on_membership_valid(payload: dict) -> None:
         result = await telegram_ops.grant_access(tg_id, chats, plan_name=plan_name)
         logger.info(f"Granted access to tg={tg_id} for whop={whop_user}: {result}")
 
+        checkout_email = _checkout_email(entity) or _checkout_email_from_payload(payload)
         await airtable_sync.member_joined(
             telegram_user_id=tg_id,
             telegram_username=local_user.get("username"),
@@ -223,7 +224,14 @@ async def on_membership_valid(payload: dict) -> None:
             whop_user_id=whop_user,
             whop_membership_id=membership_id,
             plan=plan_name,
+            email=checkout_email,
         )
+        if checkout_email:
+            storage.upsert_user(
+                tg_id,
+                checkout_email=checkout_email,
+                contact_email=checkout_email,
+            )
         return
 
     # Path B: no Telegram link yet — pending claim (email match or /claim code)
@@ -236,6 +244,7 @@ async def on_membership_valid(payload: dict) -> None:
         whop_membership_id=membership_id,
         product_id=product_id,
         plan=plan_name,
+        product_name=_product_name(entity),
         email=checkout_email,
         payment_id=payment_ref,
         receipt_id=payment_ref,

@@ -1,5 +1,5 @@
 {
-  "version": 4,
+  "version": 5,
   "reminder_hours": 24,
   "max_reminders": 2,
 
@@ -9,7 +9,9 @@
 
   "contact_intro_message": "Before we continue, we need your contact details so our team can reach you if anything in your trading platform settings is incorrect.\n\nYour Telegram ID: `{telegram_id}`\nYour Telegram username: {telegram_username}\n\nIf these look wrong, update them in Telegram settings first, then continue.",
 
-  "contact_email_prompt": "Please reply with your *email address* in your next message.",
+  "contact_full_name_prompt": "Please reply with your *full name* (first and last name) in your next message.",
+
+  "contact_email_prompt": "Thank you. Now please reply with your *email address* in your next message.",
 
   "contact_phone_prompt": "Thank you. Now please reply with your *phone number* (include country code, e.g. +31...).",
 

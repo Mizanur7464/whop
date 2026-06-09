@@ -97,11 +97,13 @@ def resolve_plan_name(
 
 
 def plan_for_airtable(plan: str | None) -> str | None:
-    """Skip writing ``unknown``; title-case mapped tier names for Airtable selects."""
-    if not plan or plan.strip().lower() == "unknown":
+    """Format plan for Airtable — always persist something when we have a value."""
+    if not plan or not plan.strip():
         return None
     normalized = plan.strip().lower()
-    if normalized in _MAPPING or normalized in {"basic", "premium", "vip"}:
+    if normalized == "unknown":
+        return "unknown"
+    if normalized in {"basic", "premium", "vip"}:
         return normalized.title()
     return plan.strip()[:80]
 

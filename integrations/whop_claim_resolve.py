@@ -42,18 +42,27 @@ def _membership_ids(m: dict) -> tuple[str | None, str | None, str | None]:
     )
 
 
+def _product_name_from_membership(m: dict) -> str | None:
+    product = m.get("product") or {}
+    if not isinstance(product, dict):
+        return None
+    return product.get("title") or product.get("name")
+
+
 def _claim_payload(
     *,
     whop_user: str | None,
     membership_id: str | None,
     product_id: str | None,
     email: str,
+    product_name: str | None = None,
 ) -> dict[str, Any]:
     return {
         "whop_user_id": whop_user,
         "whop_membership_id": membership_id,
         "product_id": product_id,
-        "plan": plan_mapping.resolve_plan_name(product_id),
+        "product_name": product_name,
+        "plan": plan_mapping.resolve_plan_name(product_id, product_name),
         "email": email,
     }
 
@@ -63,6 +72,7 @@ async def _match_membership_row(
 ) -> dict[str, Any] | None:
     mem_email = _email_from_membership(m)
     whop_user, membership_id, product_id = _membership_ids(m)
+    product_name = _product_name_from_membership(m)
     if mem_email == target:
         logger.info(
             f"whop_claim_resolve: match membership={membership_id} "
@@ -73,6 +83,7 @@ async def _match_membership_row(
             membership_id=membership_id,
             product_id=product_id,
             email=target,
+            product_name=product_name,
         )
 
     if whop_user and not mem_email:
@@ -89,6 +100,7 @@ async def _match_membership_row(
                     membership_id=membership_id,
                     product_id=product_id,
                     email=target,
+                    product_name=product_name,
                 )
         except WhopAPIError as e:
             logger.warning(

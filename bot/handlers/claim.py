@@ -143,6 +143,7 @@ async def fulfill_claim(
     plan_name = plan_mapping.resolve_plan_name(
         product_id, claim.get("product_name") or claim.get("plan")
     )
+    checkout_email = (claim.get("email") or "").strip().lower() or None
 
     storage.clear_awaiting_claim_email(telegram_user_id)
     storage.link_whop_user(
@@ -154,6 +155,8 @@ async def fulfill_claim(
         username=username or "",
         first_name=first_name or "",
         last_name=last_name or "",
+        checkout_email=checkout_email,
+        contact_email=checkout_email,
     )
 
     logger.info(
@@ -180,6 +183,7 @@ async def fulfill_claim(
                 whop_user_id=whop_user_id,
                 whop_membership_id=claim["whop_membership_id"],
                 plan=plan_name,
+                email=checkout_email,
             )
         except Exception as e:
             logger.warning(
