@@ -107,12 +107,25 @@ async def terms_accepted(
         logger.warning(f"Airtable terms_accepted failed: {e}")
 
 
-async def onboarding_completed(telegram_user_id: int) -> None:
+async def onboarding_completed(
+    telegram_user_id: int,
+    *,
+    plan: str | None = None,
+    phone: str | None = None,
+    platform: str | None = None,
+    platform_user_id: str | None = None,
+) -> None:
     c = client()
     if not c.enabled:
         return
     try:
-        await c.mark_onboarding_complete(telegram_user_id)
+        await c.mark_onboarding_complete(
+            telegram_user_id,
+            plan=plan,
+            phone=phone,
+            platform=platform,
+            platform_user_id=platform_user_id,
+        )
         logger.info(f"Airtable: onboarding done tg={telegram_user_id}")
     except Exception as e:
         logger.warning(f"Airtable onboarding_completed failed: {e}")
@@ -188,21 +201,26 @@ async def member_contact_collected(
     name: str | None,
     email: str,
     phone: str,
+    platform: str | None = None,
+    platform_user_id: str | None = None,
 ) -> None:
     c = client()
     if not c.enabled:
         return
-    note = f"Phone: {phone}"
     try:
         await c.upsert_member(
             telegram_user_id=telegram_user_id,
             telegram_username=telegram_username,
             name=name,
             email=email,
-            status=MemberStatus.PENDING,
+            phone=phone,
+            platform=platform,
+            platform_user_id=platform_user_id,
         )
-        await c.append_member_note(telegram_user_id, note)
-        logger.info(f"Airtable: contact saved tg={telegram_user_id}")
+        logger.info(
+            f"Airtable: contact saved tg={telegram_user_id} "
+            f"platform={platform!r} platform_user_id={platform_user_id!r}"
+        )
     except Exception as e:
         logger.warning(f"Airtable member_contact_collected failed: {e}")
 
@@ -269,6 +287,8 @@ async def payment_recorded(
     plan: str | None,
     status: str = "succeeded",
     notes: str | None = None,
+    fees: float | None = None,
+    net_amount: float | None = None,
 ) -> None:
     c = client()
     if not c.enabled:
@@ -287,6 +307,8 @@ async def payment_recorded(
             telegram_user_id=telegram_user_id,
             whop_user_id=whop_user_id,
             amount=amount,
+            fees=fees,
+            net_amount=net_amount,
             currency=currency,
             plan=plan,
             status=canonical,

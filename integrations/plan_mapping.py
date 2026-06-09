@@ -81,11 +81,29 @@ def resolve_chats_for_product(product_id: str | None) -> tuple[int, ...]:
     return tier.chats
 
 
-def resolve_plan_name(product_id: str | None) -> str:
-    if not product_id:
-        return "unknown"
-    tier = _MAPPING.get(product_id)
-    return tier.name if tier else "unknown"
+def resolve_plan_name(
+    product_id: str | None,
+    product_label: str | None = None,
+) -> str:
+    if product_id:
+        tier = _MAPPING.get(product_id)
+        if tier:
+            return tier.name
+    if product_label:
+        label = product_label.strip()
+        if label:
+            return label
+    return "unknown"
+
+
+def plan_for_airtable(plan: str | None) -> str | None:
+    """Skip writing ``unknown``; title-case mapped tier names for Airtable selects."""
+    if not plan or plan.strip().lower() == "unknown":
+        return None
+    normalized = plan.strip().lower()
+    if normalized in _MAPPING or normalized in {"basic", "premium", "vip"}:
+        return normalized.title()
+    return plan.strip()[:80]
 
 
 def all_known_chats() -> set[int]:

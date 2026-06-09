@@ -32,10 +32,12 @@ bot will write into. Total time: ~15 minutes.
 
 ---
 
-## 3. Create 4 Tables
+## 3. Create 3 Tables (+ Checklist)
 
-Delete the default `Table 1` Airtable made, then create these four
-tables. Field names must match **exactly** — they're case-sensitive.
+Delete the default `Table 1` Airtable made, then create these tables.
+Field names must match **exactly** — they're case-sensitive.
+
+Or run `python scripts/setup_airtable.py` to auto-create them.
 
 ### Table 1 — `Members`
 
@@ -45,6 +47,9 @@ tables. Field names must match **exactly** — they're case-sensitive.
 | Telegram Username | Single line text | |
 | Name | Single line text | |
 | Email | Email | |
+| Phone | Single line text | From onboarding contact step |
+| Platform | Single select | Options: **Vantage, Premier** (Inside UAE → Vantage, Outside UAE → Premier) |
+| Platform User ID | Single line text | Trading platform username / account ID |
 | Whop User ID | Single line text | |
 | Whop Membership ID | Single line text | |
 | Plan | Single select | Options: Basic, Premium, VIP, unknown |
@@ -57,33 +62,31 @@ tables. Field names must match **exactly** — they're case-sensitive.
 | Cancel At Period End | Checkbox | |
 | Notes | Long text | |
 
-### Table 2 — `Payments`
+### Table 2 — `Finance` (payments + expenses combined)
+
+All revenue and costs live here for easy P&amp;L (filter by **Type**).
 
 | Field name | Type | Notes |
 |---|---|---|
-| Payment ID | Single line text | **Primary field** |
+| Entry ID | Single line text | **Primary field** — Whop payment ID or `exp-…` |
+| Type | Single select | **Payment** or **Expense** |
 | Member | Link to another record | Linked to `Members` |
-| Whop User ID | Single line text | |
-| Amount | Number (decimal) | |
-| Currency | Single line text | e.g. USD, EUR |
-| Plan | Single line text | |
+| Amount | Number (decimal) | Gross; **allow negative values** |
+| Fees | Number (decimal) | Whop / transaction fees; **allow negative values** |
+| Net Amount | Number (decimal) | Amount minus fees; **allow negative values** |
+| Currency | Single select | Options: **EUR, USD, GBP** |
 | Date | Date (include time) | |
-| Status | Single select | Options: Succeeded, Failed, Refunded |
+| Whop User ID | Single line text | Payments only |
+| Plan | Single line text | Payments only |
+| Status | Single select | Payments: Succeeded, Failed, Refunded |
+| Category | Single select | Expenses: Ads, Tools, Salary, Software, Hosting, Other |
+| Description | Long text | Expenses only |
+| Added By | Single line text | Expenses only — admin Telegram handle |
 | Notes | Long text | |
 
-### Table 3 — `Expenses`
+Set `AIRTABLE_FINANCE_TABLE=Finance` in `.env` (default).
 
-| Field name | Type | Notes |
-|---|---|---|
-| Date | Date (include time) | **Primary field** |
-| Category | Single select | Options: Ads, Tools, Salary, Software, Hosting, Other |
-| Amount | Number (decimal) | |
-| Currency | Single line text | |
-| Description | Long text | |
-| Added By | Single line text | Telegram username of admin |
-| Notes | Long text | |
-
-### Table 4 — `Checklist`
+### Table 3 — `Checklist`
 
 | Field name | Type | Notes |
 |---|---|---|
@@ -96,64 +99,49 @@ tables. Field names must match **exactly** — they're case-sensitive.
 
 ---
 
-## 4. (Optional) Recommended Views
-
-In Airtable each table can have multiple views. Useful presets:
+## 4. Recommended Views
 
 ### Members
 - **Active members** — Filter: `Status = Active`
 - **Onboarding pending** — Filter: `Onboarding Completed = false`
-- **Churn list** — Filter: `Status = Expired` last 30 days
+- **By platform** — Group by `Platform`
 
-### Payments
-- **This month** — Filter: `Date this month`
-- **Failed only** — Filter: `Status = Failed`
-
-### Expenses
-- **This month** — Filter: `Date this month`
-- **By category** — Group by `Category`
+### Finance
+- **Payments only** — Filter: `Type = Payment`
+- **Expenses only** — Filter: `Type = Expense`
+- **This month P&amp;L** — Group by `Type`, sum `Net Amount`
 
 ---
 
 ## 5. Auto-create tables (optional)
 
-If the base is empty (only default `Table 1`), run:
-
 ```bash
 python scripts/setup_airtable.py
 ```
 
-This creates `Members`, `Payments`, `Expenses`, and `Checklist` with the
-correct fields. You can delete `Table 1` and any test tables in the UI.
+Creates `Members`, `Finance`, and `Checklist`. Delete unused tables like `Table 1` / old `Payments` / `Expenses` in the UI if you migrated.
 
 ---
 
 ## 6. Verify Setup
 
-Once `.env` has both `AIRTABLE_API_KEY` and `AIRTABLE_BASE_ID`, run the
-bot and DM yourself:
-
 ```
 /airtable_check
 ```
 
-You should see ✅ next to each table. Any ❌ means a field name typo
-or a missing table — fix it in Airtable and re-run.
+You should see ✅ for **Members**, **Finance**, and **Checklist**.
 
 ---
 
-## 7. Test the Pipeline
+## 7. Test Member Sync (status, plan, platform)
 
-Once schema is green:
+1. **Claim Whop** (or test purchase) → new row in **Members**, **Status = Active**
+2. **`/onboarding`** → pick location (Inside UAE = Vantage PDF, Outside = Premier PDF)
+3. Enter **email → phone → platform user ID** → check **Members** for Phone, Platform, Platform User ID
+4. Complete checklist → T&amp;C → send screenshot → admin **Approve**
+5. **Members** should show **Status = Active**, **Onboarding Completed = checked**, correct **Plan**
 
-```
-/expense 50 USD Ads Test entry
-/revenue 30
-/expenses 30
-/pnl 30
-```
-
-These should all return data (zeroes are fine for an empty base).
+Quick bot checks: `/airtable_check`, `/pnl 30`, `/expense 10 USD Ads test`
 
 ---
 
@@ -163,6 +151,6 @@ These should all return data (zeroes are fine for an empty base).
 |---|---|
 | `❌ Airtable not configured` | `.env` missing keys |
 | `Missing fields: X` | Field name typo in Airtable |
-| `Permission denied` | API token lacks access to base or `data.records:write` |
-| Empty revenue / expenses | No payments synced yet — make a test purchase |
-| Records appear without member link | `/sync` has not run since `Member` was added |
+| Status stuck on Pending | Old bot version — redeploy latest |
+| Plan = unknown | Set `WHOP_PRODUCT_*` in Railway or rely on Whop product title |
+| Finance empty | No Whop payment webhook yet — try `/expense` to test writes |

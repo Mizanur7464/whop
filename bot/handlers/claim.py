@@ -140,7 +140,9 @@ async def fulfill_claim(
     """Link Whop membership and grant Telegram group access."""
     whop_user_id = claim["whop_user_id"]
     product_id = claim.get("product_id")
-    plan_name = plan_mapping.resolve_plan_name(product_id)
+    plan_name = plan_mapping.resolve_plan_name(
+        product_id, claim.get("product_name") or claim.get("plan")
+    )
 
     storage.clear_awaiting_claim_email(telegram_user_id)
     storage.link_whop_user(

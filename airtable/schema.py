@@ -21,6 +21,9 @@ class MembersField:
     TELEGRAM_USERNAME = "Telegram Username"
     NAME = "Name"
     EMAIL = "Email"
+    PHONE = "Phone"
+    PLATFORM = "Platform"
+    PLATFORM_USER_ID = "Platform User ID"
     WHOP_USER_ID = "Whop User ID"
     WHOP_MEMBERSHIP_ID = "Whop Membership ID"
     PLAN = "Plan"
@@ -41,19 +44,56 @@ class MemberStatus(str, Enum):
     PENDING = "Pending"
 
 
-# ---------- Payments table ----------
+class TradingPlatform(str, Enum):
+    VANTAGE = "Vantage"
+    PREMIER = "Premier"
 
-class PaymentsField:
-    PAYMENT_ID = "Payment ID"
-    MEMBER = "Member"               # link to Members
-    WHOP_USER_ID = "Whop User ID"   # denormalized for filtering
+
+TRADING_PLATFORMS = frozenset(p.value for p in TradingPlatform)
+
+
+# ---------- Unified Finance table (payments + expenses) ----------
+
+class FinanceField:
+    ENTRY_ID = "Entry ID"
+    TYPE = "Type"
+    MEMBER = "Member"
     AMOUNT = "Amount"
+    FEES = "Fees"
+    NET_AMOUNT = "Net Amount"
     CURRENCY = "Currency"
-    PLAN = "Plan"
     DATE = "Date"
+    WHOP_USER_ID = "Whop User ID"
+    PLAN = "Plan"
     STATUS = "Status"
+    CATEGORY = "Category"
+    DESCRIPTION = "Description"
+    ADDED_BY = "Added By"
     NOTES = "Notes"
 
+
+class FinanceType(str, Enum):
+    PAYMENT = "Payment"
+    EXPENSE = "Expense"
+
+
+# ---------- Legacy field aliases (Finance table) ----------
+
+class PaymentsField:
+    PAYMENT_ID = FinanceField.ENTRY_ID
+    MEMBER = FinanceField.MEMBER
+    WHOP_USER_ID = FinanceField.WHOP_USER_ID
+    AMOUNT = FinanceField.AMOUNT
+    FEES = FinanceField.FEES
+    NET_AMOUNT = FinanceField.NET_AMOUNT
+    CURRENCY = FinanceField.CURRENCY
+    PLAN = FinanceField.PLAN
+    DATE = FinanceField.DATE
+    STATUS = FinanceField.STATUS
+    NOTES = FinanceField.NOTES
+
+
+# ---------- Payments table (deprecated — use Finance) ----------
 
 class PaymentStatus(str, Enum):
     SUCCEEDED = "Succeeded"
@@ -64,13 +104,24 @@ class PaymentStatus(str, Enum):
 # ---------- Expenses table ----------
 
 class ExpensesField:
-    DATE = "Date"
-    CATEGORY = "Category"
-    AMOUNT = "Amount"
-    CURRENCY = "Currency"
-    DESCRIPTION = "Description"
-    ADDED_BY = "Added By"           # Telegram username
-    NOTES = "Notes"
+    DATE = FinanceField.DATE
+    CATEGORY = FinanceField.CATEGORY
+    AMOUNT = FinanceField.AMOUNT
+    FEES = FinanceField.FEES
+    NET_AMOUNT = FinanceField.NET_AMOUNT
+    CURRENCY = FinanceField.CURRENCY
+    DESCRIPTION = FinanceField.DESCRIPTION
+    ADDED_BY = FinanceField.ADDED_BY
+    NOTES = FinanceField.NOTES
+
+
+class Currency(str, Enum):
+    EUR = "EUR"
+    USD = "USD"
+    GBP = "GBP"
+
+
+SUPPORTED_CURRENCIES = frozenset(c.value for c in Currency)
 
 
 class ExpenseCategory(str, Enum):
@@ -100,24 +151,23 @@ ALL_TABLES = {
         MembersField.TELEGRAM_USER_ID,
         MembersField.TELEGRAM_USERNAME,
         MembersField.NAME,
+        MembersField.EMAIL,
+        MembersField.PHONE,
+        MembersField.PLATFORM,
+        MembersField.PLATFORM_USER_ID,
         MembersField.WHOP_USER_ID,
         MembersField.PLAN,
         MembersField.STATUS,
         MembersField.JOIN_DATE,
     ],
-    "payments": [
-        PaymentsField.PAYMENT_ID,
-        PaymentsField.AMOUNT,
-        PaymentsField.CURRENCY,
-        PaymentsField.DATE,
-        PaymentsField.STATUS,
-    ],
-    "expenses": [
-        ExpensesField.DATE,
-        ExpensesField.CATEGORY,
-        ExpensesField.AMOUNT,
-        ExpensesField.CURRENCY,
-        ExpensesField.DESCRIPTION,
+    "finance": [
+        FinanceField.ENTRY_ID,
+        FinanceField.TYPE,
+        FinanceField.AMOUNT,
+        FinanceField.FEES,
+        FinanceField.NET_AMOUNT,
+        FinanceField.CURRENCY,
+        FinanceField.DATE,
     ],
     "checklist": [
         ChecklistField.TELEGRAM_USER_ID,

@@ -38,14 +38,42 @@ except ImportError:
 from airtable.schema import (
     ALL_TABLES,
     ChecklistField,
+    Currency,
     ExpenseCategory,
     ExpensesField,
+    FinanceField,
+    FinanceType,
     MembersField,
     MemberStatus,
     PaymentsField,
     PaymentStatus,
+    SUPPORTED_CURRENCIES,
+    TRADING_PLATFORMS,
 )
 from config import settings
+
+
+def normalize_currency(raw: str | None) -> str:
+    code = (raw or "USD").strip().upper()
+    if code in SUPPORTED_CURRENCIES:
+        return code
+    logger.warning(
+        f"Airtable currency {code!r} not in {sorted(SUPPORTED_CURRENCIES)} — storing as USD"
+    )
+    return Currency.USD.value
+
+
+def normalize_trading_platform(raw: str | None) -> str | None:
+    if not raw:
+        return None
+    value = raw.strip()
+    if value.lower() == "vantage":
+        return "Vantage"
+    if value.lower() == "premier":
+        return "Premier"
+    if value in TRADING_PLATFORMS:
+        return value
+    return None
 
 
 class AirtableNotConfigured(Exception):
@@ -142,6 +170,9 @@ class AirtableClient:
         status: MemberStatus | str | None = None,
         join_date: str | None = None,
         email: str | None = None,
+        phone: str | None = None,
+        platform: str | None = None,
+        platform_user_id: str | None = None,
     ) -> Optional[dict]:
         """Create-or-update a Members row by Telegram User ID."""
         if not self.enabled:
@@ -158,8 +189,9 @@ class AirtableClient:
             fields[MembersField.WHOP_USER_ID] = whop_user_id
         if whop_membership_id:
             fields[MembersField.WHOP_MEMBERSHIP_ID] = whop_membership_id
-        if plan:
-            fields[MembersField.PLAN] = plan
+        plan_value = self._plan_field(plan)
+        if plan_value:
+            fields[MembersField.PLAN] = plan_value
         if status is not None:
             fields[MembersField.STATUS] = (
                 status.value if isinstance(status, MemberStatus) else str(status)
@@ -168,6 +200,13 @@ class AirtableClient:
             fields[MembersField.JOIN_DATE] = join_date
         if email:
             fields[MembersField.EMAIL] = email
+        if phone:
+            fields[MembersField.PHONE] = phone
+        platform_value = normalize_trading_platform(platform)
+        if platform_value:
+            fields[MembersField.PLATFORM] = platform_value
+        if platform_user_id:
+            fields[MembersField.PLATFORM_USER_ID] = platform_user_id.strip()
         fields[MembersField.LAST_ACTIVITY] = datetime.now(timezone.utc).isoformat()
 
         table = self._table(settings.airtable_members_table)
@@ -177,6 +216,31 @@ class AirtableClient:
         if existing:
             return await self._run(table.update, existing["id"], fields)
         return await self._run(table.create, fields)
+
+    @staticmethod
+    def _plan_field(plan: str | None) -> str | None:
+        from integrations.plan_mapping import plan_for_airtable
+
+        return plan_for_airtable(plan)
+
+    @staticmethod
+    def _money_fields(
+        *,
+        amount: float,
+        fees: float | None = None,
+        net_amount: float | None = None,
+        amount_key: str = FinanceField.AMOUNT,
+        fees_key: str = FinanceField.FEES,
+        net_key: str = FinanceField.NET_AMOUNT,
+    ) -> dict[str, float]:
+        gross = float(amount)
+        fee_val = float(fees) if fees is not None else 0.0
+        net_val = float(net_amount) if net_amount is not None else gross - fee_val
+        return {
+            amount_key: gross,
+            fees_key: fee_val,
+            net_key: net_val,
+        }
 
     async def update_member_status(
         self, telegram_user_id: int, status: MemberStatus | str
@@ -232,11 +296,16 @@ class AirtableClient:
             f"T&C accepted at {accepted_at_iso}",
             telegram_username=telegram_username,
             name=name,
-            status=MemberStatus.PENDING,
         )
 
     async def mark_onboarding_complete(
-        self, telegram_user_id: int
+        self,
+        telegram_user_id: int,
+        *,
+        plan: str | None = None,
+        phone: str | None = None,
+        platform: str | None = None,
+        platform_user_id: str | None = None,
     ) -> Optional[dict]:
         if not self.enabled:
             return None
@@ -245,10 +314,22 @@ class AirtableClient:
         existing = await self._run(table.first, formula=match_formula)
         if not existing:
             return None
-        fields = {
+        fields: dict[str, Any] = {
             MembersField.ONBOARDING_COMPLETED: True,
             MembersField.ONBOARDING_COMPLETED_AT: datetime.now(timezone.utc).isoformat(),
+            MembersField.STATUS: MemberStatus.ACTIVE.value,
+            MembersField.LAST_ACTIVITY: datetime.now(timezone.utc).isoformat(),
         }
+        plan_value = self._plan_field(plan)
+        if plan_value:
+            fields[MembersField.PLAN] = plan_value
+        if phone:
+            fields[MembersField.PHONE] = phone
+        platform_value = normalize_trading_platform(platform)
+        if platform_value:
+            fields[MembersField.PLATFORM] = platform_value
+        if platform_user_id:
+            fields[MembersField.PLATFORM_USER_ID] = platform_user_id.strip()
         return await self._run(table.update, existing["id"], fields)
 
     async def find_member_record_id(self, telegram_user_id: int) -> Optional[str]:
@@ -259,7 +340,74 @@ class AirtableClient:
         rec = await self._run(table.first, formula=match_formula)
         return rec["id"] if rec else None
 
-    # ---------- Payments ----------
+    # ---------- Finance (payments + expenses in one table) ----------
+
+    async def record_finance_entry(
+        self,
+        *,
+        entry_id: str,
+        entry_type: FinanceType | str,
+        amount: float,
+        currency: str,
+        date_iso: str | None = None,
+        telegram_user_id: int | None = None,
+        fees: float | None = None,
+        net_amount: float | None = None,
+        whop_user_id: str | None = None,
+        plan: str | None = None,
+        status: PaymentStatus | str | None = None,
+        category: ExpenseCategory | str | None = None,
+        description: str | None = None,
+        added_by: str | None = None,
+        notes: str | None = None,
+    ) -> Optional[dict]:
+        if not self.enabled:
+            return None
+
+        type_value = (
+            entry_type.value
+            if isinstance(entry_type, FinanceType)
+            else str(entry_type)
+        )
+        fields: dict[str, Any] = {
+            FinanceField.ENTRY_ID: entry_id,
+            FinanceField.TYPE: type_value,
+            **self._money_fields(amount=amount, fees=fees, net_amount=net_amount),
+            FinanceField.CURRENCY: normalize_currency(currency),
+            FinanceField.DATE: date_iso or datetime.now(timezone.utc).isoformat(),
+        }
+        plan_value = self._plan_field(plan)
+        if plan_value:
+            fields[FinanceField.PLAN] = plan_value
+        if whop_user_id:
+            fields[FinanceField.WHOP_USER_ID] = whop_user_id
+        if status is not None:
+            fields[FinanceField.STATUS] = (
+                status.value if isinstance(status, PaymentStatus) else str(status)
+            )
+        if category is not None:
+            fields[FinanceField.CATEGORY] = (
+                category.value if isinstance(category, ExpenseCategory) else str(category)
+            )
+        if description:
+            fields[FinanceField.DESCRIPTION] = description
+        if added_by:
+            fields[FinanceField.ADDED_BY] = added_by
+        if notes:
+            fields[FinanceField.NOTES] = notes
+
+        if telegram_user_id is not None:
+            member_rec_id = await self.find_member_record_id(telegram_user_id)
+            if member_rec_id:
+                fields[FinanceField.MEMBER] = [member_rec_id]
+
+        table = self._table(settings.airtable_finance_table)
+        existing = await self._run(
+            table.first, formula=match({FinanceField.ENTRY_ID: entry_id})
+        )
+        if existing:
+            return await self._run(table.update, existing["id"], fields)
+        return await self._run(table.create, fields)
 
     async def record_payment(
         self,
@@ -273,40 +421,23 @@ class AirtableClient:
         date_iso: str | None = None,
         whop_user_id: str | None = None,
         notes: str | None = None,
+        fees: float | None = None,
+        net_amount: float | None = None,
     ) -> Optional[dict]:
-        if not self.enabled:
-            return None
-
-        fields: dict[str, Any] = {
-            PaymentsField.PAYMENT_ID: payment_id,
-            PaymentsField.AMOUNT: float(amount),
-            PaymentsField.CURRENCY: currency.upper(),
-            PaymentsField.DATE: date_iso or datetime.now(timezone.utc).isoformat(),
-            PaymentsField.STATUS: (
-                status.value if isinstance(status, PaymentStatus) else str(status)
-            ),
-        }
-        if plan:
-            fields[PaymentsField.PLAN] = plan
-        if whop_user_id:
-            fields[PaymentsField.WHOP_USER_ID] = whop_user_id
-        if notes:
-            fields[PaymentsField.NOTES] = notes
-
-        if telegram_user_id is not None:
-            member_rec_id = await self.find_member_record_id(telegram_user_id)
-            if member_rec_id:
-                fields[PaymentsField.MEMBER] = [member_rec_id]
-
-        table = self._table(settings.airtable_payments_table)
-        existing = await self._run(
-            table.first, formula=match({PaymentsField.PAYMENT_ID: payment_id})
+        return await self.record_finance_entry(
+            entry_id=payment_id,
+            entry_type=FinanceType.PAYMENT,
+            telegram_user_id=telegram_user_id,
+            amount=amount,
+            fees=fees,
+            net_amount=net_amount,
+            currency=currency,
+            plan=plan,
+            status=status,
+            date_iso=date_iso,
+            whop_user_id=whop_user_id,
+            notes=notes,
         )
-        if existing:
-            return await self._run(table.update, existing["id"], fields)
-        return await self._run(table.create, fields)
-
-    # ---------- Expenses ----------
 
     async def add_expense(
         self,
@@ -318,26 +449,23 @@ class AirtableClient:
         added_by: str | None = None,
         date_iso: str | None = None,
         notes: str | None = None,
+        fees: float | None = None,
+        net_amount: float | None = None,
     ) -> Optional[dict]:
-        if not self.enabled:
-            return None
-
-        fields: dict[str, Any] = {
-            ExpensesField.AMOUNT: float(amount),
-            ExpensesField.CURRENCY: currency.upper(),
-            ExpensesField.CATEGORY: (
-                category.value if isinstance(category, ExpenseCategory) else str(category)
-            ),
-            ExpensesField.DESCRIPTION: description,
-            ExpensesField.DATE: date_iso or datetime.now(timezone.utc).isoformat(),
-        }
-        if added_by:
-            fields[ExpensesField.ADDED_BY] = added_by
-        if notes:
-            fields[ExpensesField.NOTES] = notes
-
-        table = self._table(settings.airtable_expenses_table)
-        return await self._run(table.create, fields)
+        entry_id = f"exp-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S%f')}"
+        return await self.record_finance_entry(
+            entry_id=entry_id,
+            entry_type=FinanceType.EXPENSE,
+            amount=amount,
+            fees=fees,
+            net_amount=net_amount,
+            currency=currency,
+            category=category,
+            description=description,
+            added_by=added_by,
+            date_iso=date_iso,
+            notes=notes,
+        )
 
     # ---------- Checklist activity ----------
 
@@ -375,16 +503,21 @@ class AirtableClient:
         if not self.enabled:
             return {"by_currency": {}, "count": 0}
 
-        table = self._table(settings.airtable_payments_table)
+        table = self._table(settings.airtable_finance_table)
         records = await self._run(table.all) or []
 
         totals: dict[str, float] = {}
         count = 0
         for r in records:
             f = r.get("fields", {})
-            if f.get(PaymentsField.STATUS) != PaymentStatus.SUCCEEDED.value:
+            if f.get(FinanceField.TYPE) != FinanceType.PAYMENT.value:
                 continue
-            date_str = f.get(PaymentsField.DATE)
+            if f.get(FinanceField.STATUS) not in (
+                None,
+                PaymentStatus.SUCCEEDED.value,
+            ):
+                continue
+            date_str = f.get(FinanceField.DATE)
             if date_str:
                 try:
                     when = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
@@ -394,8 +527,11 @@ class AirtableClient:
                     continue
                 if until and when > until:
                     continue
-            currency = (f.get(PaymentsField.CURRENCY) or "USD").upper()
-            amount = float(f.get(PaymentsField.AMOUNT) or 0)
+            currency = normalize_currency(f.get(FinanceField.CURRENCY))
+            if FinanceField.NET_AMOUNT in f:
+                amount = float(f.get(FinanceField.NET_AMOUNT) or 0)
+            else:
+                amount = float(f.get(FinanceField.AMOUNT) or 0)
             totals[currency] = totals.get(currency, 0.0) + amount
             count += 1
 
@@ -407,7 +543,7 @@ class AirtableClient:
         if not self.enabled:
             return {"by_currency": {}, "by_category": {}, "count": 0}
 
-        table = self._table(settings.airtable_expenses_table)
+        table = self._table(settings.airtable_finance_table)
         records = await self._run(table.all) or []
 
         by_currency: dict[str, float] = {}
@@ -415,7 +551,9 @@ class AirtableClient:
         count = 0
         for r in records:
             f = r.get("fields", {})
-            date_str = f.get(ExpensesField.DATE)
+            if f.get(FinanceField.TYPE) != FinanceType.EXPENSE.value:
+                continue
+            date_str = f.get(FinanceField.DATE)
             if date_str:
                 try:
                     when = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
@@ -425,9 +563,12 @@ class AirtableClient:
                     continue
                 if until and when > until:
                     continue
-            currency = (f.get(ExpensesField.CURRENCY) or "USD").upper()
-            amount = float(f.get(ExpensesField.AMOUNT) or 0)
-            category = f.get(ExpensesField.CATEGORY) or "Other"
+            currency = normalize_currency(f.get(FinanceField.CURRENCY))
+            if FinanceField.NET_AMOUNT in f:
+                amount = float(f.get(FinanceField.NET_AMOUNT) or 0)
+            else:
+                amount = float(f.get(FinanceField.AMOUNT) or 0)
+            category = f.get(FinanceField.CATEGORY) or "Other"
             by_currency[currency] = by_currency.get(currency, 0.0) + amount
             by_category[category] = by_category.get(category, 0.0) + amount
             count += 1
@@ -448,8 +589,7 @@ class AirtableClient:
         results: dict[str, dict] = {}
         table_map = {
             "members": settings.airtable_members_table,
-            "payments": settings.airtable_payments_table,
-            "expenses": settings.airtable_expenses_table,
+            "finance": settings.airtable_finance_table,
             "checklist": settings.airtable_checklist_table,
         }
 

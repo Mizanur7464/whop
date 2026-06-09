@@ -1,5 +1,5 @@
 {
-  "version": 3,
+  "version": 4,
   "reminder_hours": 24,
   "max_reminders": 2,
 
@@ -12,6 +12,8 @@
   "contact_email_prompt": "Please reply with your *email address* in your next message.",
 
   "contact_phone_prompt": "Thank you. Now please reply with your *phone number* (include country code, e.g. +31...).",
+
+  "contact_platform_user_id_prompt": "Thank you. Now please reply with your *{platform} platform user ID* (the username or account ID you use on that trading platform).",
 
   "contact_saved_message": "Contact details saved. Tap *Continue* to proceed.",
 

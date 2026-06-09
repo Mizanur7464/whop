@@ -24,8 +24,8 @@ from telegram.constants import ParseMode
 from telegram.ext import ContextTypes
 
 from airtable import sync as airtable_sync
-from airtable.client import AirtableClient
-from airtable.schema import ExpenseCategory
+from airtable.client import AirtableClient, normalize_currency
+from airtable.schema import ExpenseCategory, SUPPORTED_CURRENCIES
 from bot.decorators import admin_only, log_call
 
 
@@ -59,19 +59,28 @@ async def cmd_expense(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await update.message.reply_text(
             "Usage:\n"
             "`/expense <amount> <currency> <category> <description>`\n\n"
-            f"Categories: {', '.join(_VALID_CATEGORIES)}\n\n"
-            "Example: `/expense 75 USD Ads Facebook campaign May`",
+            f"Categories: {', '.join(_VALID_CATEGORIES)}\n"
+            f"Currencies: {', '.join(sorted(SUPPORTED_CURRENCIES))}\n\n"
+            "Example: `/expense 75 USD Ads Facebook campaign May`\n"
+            "Use negative amounts for refunds/credits.",
             parse_mode=ParseMode.MARKDOWN,
         )
         return
 
     raw_amount, currency, category, *desc_parts = context.args
     description = " ".join(desc_parts)
+    currency_code = normalize_currency(currency)
 
     try:
         amount = float(raw_amount.replace(",", ""))
     except ValueError:
         await update.message.reply_text("Amount must be a number.")
+        return
+
+    if currency.strip().upper() not in SUPPORTED_CURRENCIES:
+        await update.message.reply_text(
+            f"Currency must be one of: {', '.join(sorted(SUPPORTED_CURRENCIES))}"
+        )
         return
 
     if category.title() not in _VALID_CATEGORIES:
@@ -95,7 +104,7 @@ async def cmd_expense(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     rec = await client.add_expense(
         amount=amount,
-        currency=currency,
+        currency=currency_code,
         category=category.title(),
         description=description,
         added_by=added_by,
@@ -104,7 +113,8 @@ async def cmd_expense(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if rec:
         await update.message.reply_text(
             "✅ Expense logged\n\n"
-            f"• {_fmt_money(amount, currency)}\n"
+            f"• Amount: {_fmt_money(amount, currency_code)}\n"
+            f"• Net: {_fmt_money(amount, currency_code)}\n"
             f"• {category.title()} — {description}",
             parse_mode=ParseMode.MARKDOWN,
         )

@@ -52,6 +52,10 @@ class OnboardingConfig(BaseModel):
     contact_phone_prompt: str = (
         "Thank you. Now please reply with your phone number (include country code)."
     )
+    contact_platform_user_id_prompt: str = (
+        "Thank you. Now please reply with your *{platform} platform user ID* "
+        "(the username or account ID you use on that trading platform)."
+    )
     contact_saved_message: str = "Contact details saved. Tap Continue to proceed."
     confirmation_warning_message: str = (
         "Have you gone through the whole document and set everything up correctly?\n\n"

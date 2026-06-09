@@ -27,6 +27,7 @@ from bot import storage
 from config import settings
 from integrations import plan_mapping, telegram_ops
 from integrations.whop_copy import is_free_access, membership_received_dm
+from integrations.whop_payment_amounts import parse_whop_payment_amounts
 
 Handler = Callable[[dict], Awaitable[None]]
 
@@ -72,6 +73,16 @@ def _whop_user_id(entity: dict) -> str | None:
 def _product_id(entity: dict) -> str | None:
     product = entity.get("product") or {}
     return entity.get("product_id") or product.get("id")
+
+
+def _product_name(entity: dict) -> str | None:
+    product = entity.get("product") or {}
+    return (
+        product.get("title")
+        or product.get("name")
+        or entity.get("product_name")
+        or entity.get("plan_name")
+    )
 
 
 def _membership_id(entity: dict) -> str | None:
@@ -180,7 +191,7 @@ async def on_membership_valid(payload: dict) -> None:
         logger.warning(f"membership.went_valid missing IDs: {entity}")
         return
 
-    plan_name = plan_mapping.resolve_plan_name(product_id)
+    plan_name = plan_mapping.resolve_plan_name(product_id, _product_name(entity))
     chats = plan_mapping.resolve_chats_for_product(product_id)
 
     # Path A: we already know this user's Telegram ID
@@ -324,14 +335,13 @@ async def on_membership_cancel_change(payload: dict) -> None:
 
 
 async def on_payment_succeeded(payload: dict) -> None:
-    """Mirror every successful payment into the Airtable Payments table."""
+    """Mirror every successful payment into the Airtable Finance table."""
     entity = _data(payload)
     payment_id = entity.get("id") or entity.get("payment_id") or ""
-    amount = entity.get("amount") or entity.get("subtotal") or 0
-    currency = entity.get("currency") or "USD"
+    amount, fees, net_amount, currency = parse_whop_payment_amounts(entity)
     whop_user = _whop_user_id(entity)
     product_id = _product_id(entity)
-    plan_name = plan_mapping.resolve_plan_name(product_id)
+    plan_name = plan_mapping.resolve_plan_name(product_id, _product_name(entity))
 
     if not payment_id:
         logger.warning(f"payment_succeeded missing id: {entity}")
@@ -343,13 +353,16 @@ async def on_payment_succeeded(payload: dict) -> None:
         payment_id=str(payment_id),
         telegram_user_id=tg_id,
         whop_user_id=whop_user,
-        amount=float(amount) / (100 if isinstance(amount, int) and amount > 1000 else 1),
+        amount=amount,
+        fees=fees,
+        net_amount=net_amount,
         currency=str(currency),
         plan=plan_name,
         status="succeeded",
     )
     logger.info(
-        f"Payment succeeded: id={payment_id} amount={amount} {currency}"
+        f"Payment succeeded: id={payment_id} amount={amount} fees={fees} "
+        f"net={net_amount} {currency}"
     )
 
 

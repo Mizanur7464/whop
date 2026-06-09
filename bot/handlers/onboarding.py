@@ -41,7 +41,11 @@ CONTACT_STEP_KEY = "onboarding_contact_step"
 
 
 def onboarding_contact_active(_: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
-    return context.user_data.get(CONTACT_STEP_KEY) in ("email", "phone")
+    return context.user_data.get(CONTACT_STEP_KEY) in (
+        "email",
+        "phone",
+        "platform_user_id",
+    )
 
 
 def _onb_action(data: str) -> str:
@@ -332,7 +336,9 @@ async def show_contact_intro(
     """Collect email, phone, and confirm Telegram ID before T&C."""
     user = update.effective_user
     record = storage.get_user(user.id) or {}
-    if record.get("contact_email") and record.get("contact_phone"):
+    if record.get("contact_email") and record.get("contact_phone") and record.get(
+        "platform_user_id"
+    ):
         await show_terms(update, context)
         return
 
@@ -396,14 +402,34 @@ async def on_onboarding_contact_text(
             contact_telegram_id=user.id,
             telegram_username=user.username,
         )
+        context.user_data[CONTACT_STEP_KEY] = "platform_user_id"
+        platform = (storage.get_user(user.id) or {}).get("platform") or "your platform"
+        prompt = _msg(
+            cfg.contact_platform_user_id_prompt,
+            platform=platform,
+        )
+        await safe_reply_text(
+            update.message, prompt, parse_mode=ParseMode.MARKDOWN
+        )
+        return
+
+    if step == "platform_user_id":
+        storage.upsert_user(
+            user.id,
+            platform_user_id=text,
+            contact_telegram_id=user.id,
+            telegram_username=user.username,
+        )
         context.user_data.pop(CONTACT_STEP_KEY, None)
         record = storage.get_user(user.id) or {}
         await airtable_sync.member_contact_collected(
             telegram_user_id=user.id,
             telegram_username=user.username,
             name=user.full_name,
-            email=record.get("contact_email", text),
-            phone=text,
+            email=record.get("contact_email", ""),
+            phone=record.get("contact_phone", ""),
+            platform=record.get("platform"),
+            platform_user_id=text,
         )
         markup = InlineKeyboardMarkup(
             [
@@ -510,7 +536,16 @@ async def _admin_approve(
     storage.set_approval_status(target_user_id, storage.APPROVAL_APPROVED)
     storage.mark_onboarding_completed(target_user_id)
     jobs.cancel_user_reminders(context.application, target_user_id)
-    await airtable_sync.onboarding_completed(target_user_id)
+    local_user = storage.get_user(target_user_id) or {}
+    plan = local_user.get("plan")
+    await airtable_sync.onboarding_completed(
+        target_user_id,
+        plan=plan,
+        phone=local_user.get("contact_phone"),
+        platform=local_user.get("platform"),
+        platform_user_id=local_user.get("platform_user_id"),
+    )
+    await airtable_sync.member_status_changed(target_user_id, "active")
     await unlock_for_user(target_user_id)
 
     await update.callback_query.answer("Approved ✅ — user unlocked")
@@ -689,6 +724,9 @@ def _review_caption_html(user, record: dict) -> str:
     username = html.escape(_telegram_username_line(user))
     location = html.escape(str(record.get("location", "—")))
     platform = html.escape(str(record.get("platform", "—")))
+    platform_user_id = html.escape(str(record.get("platform_user_id", "—")))
+    phone = html.escape(str(record.get("contact_phone", "—")))
+    email = html.escape(str(record.get("contact_email", "—")))
     terms_at = html.escape(str(record.get("terms_accepted_at", "—")))
     return (
         "<b>📸 Onboarding screenshot — review required</b>\n\n"
@@ -697,6 +735,9 @@ def _review_caption_html(user, record: dict) -> str:
         f"• Username: {username}\n"
         f"• Location: {location}\n"
         f"• Platform: {platform}\n"
+        f"• Platform user ID: {platform_user_id}\n"
+        f"• Email: {email}\n"
+        f"• Phone: {phone}\n"
         f"• T&amp;C accepted: {terms_at}"
     )
 

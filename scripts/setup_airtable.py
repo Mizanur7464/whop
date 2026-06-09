@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Create the four CRM tables in the Airtable base from .env (if missing).
+Create the CRM tables in the Airtable base from .env (if missing).
 
 Usage:
     python scripts/setup_airtable.py
@@ -72,6 +72,9 @@ def members_fields() -> list[dict]:
         {"name": "Telegram Username", "type": "singleLineText"},
         {"name": "Name", "type": "singleLineText"},
         {"name": "Email", "type": "email"},
+        {"name": "Phone", "type": "singleLineText"},
+        _select("Platform", ["Vantage", "Premier"]),
+        {"name": "Platform User ID", "type": "singleLineText"},
         {"name": "Whop User ID", "type": "singleLineText"},
         {"name": "Whop Membership ID", "type": "singleLineText"},
         _select("Plan", ["Basic", "Premium", "VIP", "unknown"]),
@@ -86,26 +89,20 @@ def members_fields() -> list[dict]:
     ]
 
 
-def payments_fields(members_table_id: str) -> list[dict]:
+def finance_fields(members_table_id: str) -> list[dict]:
     return [
-        {"name": "Payment ID", "type": "singleLineText"},
+        {"name": "Entry ID", "type": "singleLineText"},
+        _select("Type", ["Payment", "Expense"]),
         _link("Member", members_table_id),
+        _number("Amount"),
+        _number("Fees"),
+        _number("Net Amount"),
+        _select("Currency", ["EUR", "USD", "GBP"]),
+        _date("Date"),
         {"name": "Whop User ID", "type": "singleLineText"},
-        _number("Amount"),
-        {"name": "Currency", "type": "singleLineText"},
         {"name": "Plan", "type": "singleLineText"},
-        _date("Date"),
         _select("Status", ["Succeeded", "Failed", "Refunded"]),
-        {"name": "Notes", "type": "multilineText"},
-    ]
-
-
-def expenses_fields() -> list[dict]:
-    return [
-        _date("Date"),
         _select("Category", ["Ads", "Tools", "Salary", "Software", "Hosting", "Other"]),
-        _number("Amount"),
-        {"name": "Currency", "type": "singleLineText"},
         {"name": "Description", "type": "multilineText"},
         {"name": "Added By", "type": "singleLineText"},
         {"name": "Notes", "type": "multilineText"},
@@ -113,7 +110,6 @@ def expenses_fields() -> list[dict]:
 
 
 def checklist_fields(members_table_id: str) -> list[dict]:
-    # Primary field must be text; add Member link after table exists (see main()).
     return [
         {"name": "Telegram User ID", "type": "singleLineText"},
         {"name": "Task ID", "type": "singleLineText"},
@@ -136,8 +132,7 @@ def main() -> int:
 
     plan = [
         (settings.airtable_members_table, None),
-        (settings.airtable_payments_table, "members"),
-        (settings.airtable_expenses_table, None),
+        (settings.airtable_finance_table, "members"),
         (settings.airtable_checklist_table, "members"),
     ]
 
@@ -155,19 +150,12 @@ def main() -> int:
             if members_name not in created_ids:
                 print(f"  error: create {members_name} before {table_name}")
                 return 1
-            fields_fn = {
-                settings.airtable_payments_table: lambda: payments_fields(
-                    created_ids[members_name]
-                ),
-                settings.airtable_checklist_table: lambda: checklist_fields(
-                    created_ids[members_name]
-                ),
-            }[table_name]
-            fields = fields_fn()
+            if table_name == settings.airtable_finance_table:
+                fields = finance_fields(created_ids[members_name])
+            else:
+                fields = checklist_fields(created_ids[members_name])
         elif table_name == settings.airtable_members_table:
             fields = members_fields()
-        elif table_name == settings.airtable_expenses_table:
-            fields = expenses_fields()
         else:
             print(f"  unknown table plan for {table_name}")
             return 1

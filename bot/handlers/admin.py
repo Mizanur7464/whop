@@ -264,7 +264,7 @@ async def cmd_airtable_check(update: Update, _: ContextTypes.DEFAULT_TYPE) -> No
     report = await client.validate_schema()
 
     lines = ["*Airtable Schema Check*", ""]
-    for key in ("members", "payments", "expenses", "checklist"):
+    for key in ("members", "finance", "checklist"):
         info = report.get(key, {})
         icon = "✅" if info.get("ok") else "❌"
         table = info.get("table", key)
@@ -279,6 +279,17 @@ async def cmd_airtable_check(update: Update, _: ContextTypes.DEFAULT_TYPE) -> No
     overall = "✅ All good" if report.get("all_ok") else "⚠️ Issues found"
     lines.append("")
     lines.append(f"*Overall:* {overall}")
+    if report.get("all_ok"):
+        lines.append("")
+        lines.append(
+            "*How to test member sync:*\n"
+            "1. Claim Whop → check *Members* row (Status Active, Plan filled)\n"
+            "2. Complete onboarding contact → Email, Phone, Platform, Platform User ID\n"
+            "3. Admin approve screenshot → Status stays Active\n"
+            "4. Log expense: `/expense 10 USD Ads test` → *Finance* row Type Expense\n"
+            "5. Whop payment webhook → *Finance* row Type Payment\n"
+            "6. P&amp;L: `/pnl 30`"
+        )
 
     await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN)
 
