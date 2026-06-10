@@ -48,8 +48,14 @@ class OnboardingConfig(BaseModel):
     checklist_intro: str
     checklist_items: List[ChecklistItem]
     contact_intro_message: str = ""
+    contact_first_name_prompt: str = (
+        "Please reply with your *first name* in your next message."
+    )
+    contact_last_name_prompt: str = (
+        "Thank you. Now please reply with your *last name* in your next message."
+    )
     contact_full_name_prompt: str = (
-        "Please reply with your *full name* (first and last name) in your next message."
+        "Please reply with your *first name* in your next message."
     )
     contact_email_prompt: str = (
         "Thank you. Now please reply with your *email address* in your next message."

@@ -42,11 +42,26 @@ CONTACT_STEP_KEY = "onboarding_contact_step"
 
 def onboarding_contact_active(_: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     return context.user_data.get(CONTACT_STEP_KEY) in (
-        "full_name",
+        "first_name",
+        "last_name",
         "email",
         "phone",
         "platform_user_id",
     )
+
+
+def _contact_full_name(record: dict) -> str | None:
+    stored = (record.get("contact_full_name") or "").strip()
+    if stored:
+        return stored
+    first = (record.get("contact_first_name") or "").strip()
+    last = (record.get("contact_last_name") or "").strip()
+    combined = " ".join(part for part in (first, last) if part)
+    return combined or None
+
+
+def _contact_names_complete(record: dict) -> bool:
+    return _contact_full_name(record) is not None
 
 
 def _onb_action(data: str) -> str:
@@ -345,7 +360,7 @@ async def show_contact_intro(
     user = update.effective_user
     record = storage.get_user(user.id) or {}
     if (
-        record.get("contact_full_name")
+        _contact_names_complete(record)
         and record.get("contact_email")
         and record.get("contact_phone")
         and record.get("platform_user_id")
@@ -358,6 +373,14 @@ async def show_contact_intro(
         uname = escape_markdown(f"@{user.username}")
     else:
         uname = "not set — please set a username in Telegram settings first"
+
+    if record.get("contact_first_name") and not record.get("contact_last_name"):
+        context.user_data[CONTACT_STEP_KEY] = "last_name"
+        prompt = cfg.contact_last_name_prompt
+    else:
+        context.user_data[CONTACT_STEP_KEY] = "first_name"
+        prompt = cfg.contact_first_name_prompt
+
     text = (
         _msg(
             cfg.contact_intro_message,
@@ -365,9 +388,8 @@ async def show_contact_intro(
             telegram_username=uname,
         )
         + "\n\n"
-        + cfg.contact_full_name_prompt
+        + prompt
     )
-    context.user_data[CONTACT_STEP_KEY] = "full_name"
     if update.callback_query:
         await update.callback_query.answer()
     await _send_new_message(update, context, text, None)
@@ -390,16 +412,32 @@ async def on_onboarding_contact_text(
     cfg = onboarding_config.get()
     step = context.user_data.get(CONTACT_STEP_KEY)
 
-    if step == "full_name":
-        if len(text.split()) < 2 or len(text) < 3:
-            await update.message.reply_text(
-                "Please send your *full name* (first and last name).",
-                parse_mode=ParseMode.MARKDOWN,
-            )
+    if step == "first_name":
+        if len(text) < 2:
+            await update.message.reply_text("Please send your first name.")
             return
         storage.upsert_user(
             user.id,
-            contact_full_name=text,
+            contact_first_name=text,
+            contact_telegram_id=user.id,
+            telegram_username=user.username,
+        )
+        context.user_data[CONTACT_STEP_KEY] = "last_name"
+        await safe_reply_text(
+            update.message, cfg.contact_last_name_prompt, parse_mode=ParseMode.MARKDOWN
+        )
+        return
+
+    if step == "last_name":
+        if len(text) < 2:
+            await update.message.reply_text("Please send your last name.")
+            return
+        record = storage.get_user(user.id) or {}
+        first = (record.get("contact_first_name") or "").strip()
+        storage.upsert_user(
+            user.id,
+            contact_last_name=text,
+            contact_full_name=f"{first} {text}".strip(),
             contact_telegram_id=user.id,
             telegram_username=user.username,
         )
@@ -455,7 +493,7 @@ async def on_onboarding_contact_text(
         await airtable_sync.member_contact_collected(
             telegram_user_id=user.id,
             telegram_username=user.username,
-            name=record.get("contact_full_name") or user.full_name,
+            name=_contact_full_name(record) or user.full_name,
             email=record.get("contact_email", ""),
             phone=record.get("contact_phone", ""),
             platform=record.get("platform"),
@@ -571,7 +609,7 @@ async def _admin_approve(
     await airtable_sync.onboarding_completed(
         target_user_id,
         plan=plan,
-        name=local_user.get("contact_full_name"),
+        name=_contact_full_name(local_user),
         phone=local_user.get("contact_phone"),
         platform=local_user.get("platform"),
         platform_user_id=local_user.get("platform_user_id"),
@@ -771,7 +809,7 @@ def _review_decision_caption_html(
     approved = decision == "approved"
     icon = "✅" if approved else "❌"
     label = "Approved" if approved else "Rejected"
-    name = html.escape(str(record.get("contact_full_name") or "—"))
+    name = html.escape(str(_contact_full_name(record) or "—"))
     platform_user_id = html.escape(str(record.get("platform_user_id") or "—"))
     return (
         f"{icon} <b>{label}</b> by {_admin_actor_label(actor)}\n\n"
@@ -857,7 +895,7 @@ def _telegram_username_line(user) -> str:
 
 def _review_caption_html(user, record: dict) -> str:
     """Admin review caption — HTML avoids Markdown breaking on @ symbols."""
-    name = html.escape(str(record.get("contact_full_name") or user.full_name or "—"))
+    name = html.escape(str(_contact_full_name(record) or user.full_name or "—"))
     username = html.escape(_telegram_username_line(user))
     location = html.escape(str(record.get("location", "—")))
     platform = html.escape(str(record.get("platform", "—")))
