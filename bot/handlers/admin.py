@@ -326,19 +326,28 @@ async def cmd_airtable_setup(update: Update, _: ContextTypes.DEFAULT_TYPE) -> No
         return
 
     lines = ["*Airtable Schema Setup*", ""]
+    if report.get("deprecated_table"):
+        lines.append(f"✅ `{report['deprecated_table']}`")
+        lines.append("")
     for table_name, info in report.get("tables", {}).items():
         errors = info.get("errors") or []
         error = info.get("error")
         added = info.get("added") or []
+        fixed = info.get("fixed") or []
         if info.get("created"):
             icon = "✅"
             detail = f"created table \\({len(added)} fields\\)"
         elif errors or error:
             icon = "❌"
             detail = error or "; ".join(errors[:3])
-        elif added:
+        elif added or fixed:
             icon = "✅"
-            detail = f"added: `{', '.join(added)}`"
+            parts = []
+            if added:
+                parts.append(f"added: `{', '.join(added)}`")
+            if fixed:
+                parts.append(f"fixed: `{', '.join(fixed)}`")
+            detail = "; ".join(parts)
         else:
             icon = "✅"
             detail = "already up to date"

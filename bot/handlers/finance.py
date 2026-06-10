@@ -25,7 +25,7 @@ from telegram.ext import ContextTypes
 
 from airtable import sync as airtable_sync
 from airtable.client import AirtableClient, normalize_currency
-from airtable.schema import ExpenseCategory, SUPPORTED_CURRENCIES
+from airtable.schema import ExpenseCategory, FinanceField, SUPPORTED_CURRENCIES
 from bot.decorators import admin_only, log_call
 
 
@@ -111,10 +111,19 @@ async def cmd_expense(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     )
 
     if rec:
+        stored = rec.get("fields") or {}
+        amt = float(
+            stored.get(FinanceField.AMOUNT)
+            or stored.get(FinanceField.NET_AMOUNT)
+            or amount
+        )
+        fee = float(stored.get(FinanceField.FEES) or 0)
+        net = float(stored.get(FinanceField.NET_AMOUNT) or amt)
         await update.message.reply_text(
             "✅ Expense logged\n\n"
-            f"• Amount: {_fmt_money(amount, currency_code)}\n"
-            f"• Net: {_fmt_money(amount, currency_code)}\n"
+            f"• Amount: {_fmt_money(amt, currency_code)}\n"
+            f"• Fees: {_fmt_money(fee, currency_code)}\n"
+            f"• Net: {_fmt_money(net, currency_code)}\n"
             f"• {category.title()} — {description}",
             parse_mode=ParseMode.MARKDOWN,
         )

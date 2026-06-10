@@ -236,11 +236,19 @@ class AirtableClient:
         return plan_for_airtable(plan)
 
     @staticmethod
+    def _is_expense_entry(entry_type: FinanceType | str | None) -> bool:
+        if entry_type is None:
+            return False
+        value = entry_type.value if isinstance(entry_type, FinanceType) else str(entry_type)
+        return value.strip().lower() == FinanceType.EXPENSE.value.lower()
+
+    @staticmethod
     def _money_fields(
         *,
         amount: float,
         fees: float | None = None,
         net_amount: float | None = None,
+        entry_type: FinanceType | str | None = None,
         amount_key: str = FinanceField.AMOUNT,
         fees_key: str = FinanceField.FEES,
         net_key: str = FinanceField.NET_AMOUNT,
@@ -248,11 +256,31 @@ class AirtableClient:
         gross = float(amount)
         fee_val = float(fees) if fees is not None else 0.0
         net_val = float(net_amount) if net_amount is not None else gross - fee_val
+
+        if AirtableClient._is_expense_entry(entry_type):
+            gross = -abs(gross)
+            fee_val = abs(fee_val)
+            net_val = -abs(net_val) if net_val else gross
+        else:
+            gross = abs(gross)
+            fee_val = abs(fee_val)
+            if net_val == 0.0 and gross:
+                net_val = gross - fee_val
+            else:
+                net_val = abs(net_val) if net_val else gross - fee_val
+
         return {
             amount_key: gross,
             fees_key: fee_val,
             net_key: net_val,
         }
+
+    @staticmethod
+    def _finance_line_amount(fields: dict[str, Any]) -> float:
+        """Signed amount for P&L — expenses negative, payments positive."""
+        if FinanceField.NET_AMOUNT in fields:
+            return float(fields.get(FinanceField.NET_AMOUNT) or 0)
+        return float(fields.get(FinanceField.AMOUNT) or 0)
 
     async def update_member_status(
         self, telegram_user_id: int, status: MemberStatus | str
@@ -406,10 +434,16 @@ class AirtableClient:
             else str(entry_type)
         )
         entry_id_field = self._finance_entry_id_field()
+        money = self._money_fields(
+            amount=amount,
+            fees=fees,
+            net_amount=net_amount,
+            entry_type=type_value,
+        )
         fields: dict[str, Any] = {
             entry_id_field: entry_id,
             FinanceField.TYPE: type_value,
-            **self._money_fields(amount=amount, fees=fees, net_amount=net_amount),
+            **money,
             FinanceField.CURRENCY: normalize_currency(currency),
             FinanceField.DATE: date_iso or datetime.now(timezone.utc).isoformat(),
         }
@@ -585,11 +619,7 @@ class AirtableClient:
                 if until and when > until:
                     continue
             currency = normalize_currency(f.get(FinanceField.CURRENCY))
-            if FinanceField.NET_AMOUNT in f:
-                amount = float(f.get(FinanceField.NET_AMOUNT) or 0)
-            else:
-                amount = float(f.get(FinanceField.AMOUNT) or 0)
-            totals[currency] = totals.get(currency, 0.0) + amount
+            totals[currency] = totals.get(currency, 0.0) + self._finance_line_amount(f)
             count += 1
 
         return {"by_currency": totals, "count": count}
@@ -621,10 +651,7 @@ class AirtableClient:
                 if until and when > until:
                     continue
             currency = normalize_currency(f.get(FinanceField.CURRENCY))
-            if FinanceField.NET_AMOUNT in f:
-                amount = float(f.get(FinanceField.NET_AMOUNT) or 0)
-            else:
-                amount = float(f.get(FinanceField.AMOUNT) or 0)
+            amount = abs(self._finance_line_amount(f))
             category = f.get(FinanceField.CATEGORY) or "Other"
             by_currency[currency] = by_currency.get(currency, 0.0) + amount
             by_category[category] = by_category.get(category, 0.0) + amount

@@ -27,12 +27,17 @@ def main() -> int:
         return 1
 
     print(f"Base schema sync — ok={report.get('ok')}")
+    if report.get("deprecated_table"):
+        print(f"  {report['deprecated_table']}")
     for table_name, info in report.get("tables", {}).items():
         if info.get("created"):
             print(f"  created table {table_name}")
         added = info.get("added") or []
+        fixed = info.get("fixed") or []
         if added:
             print(f"  {table_name}: added {', '.join(added)}")
+        if fixed:
+            print(f"  {table_name}: fixed {', '.join(fixed)}")
         errors = info.get("errors") or []
         for err in errors:
             print(f"  {table_name}: ERROR {err}")
