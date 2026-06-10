@@ -28,6 +28,7 @@ from bot import (
 )
 from bot.admin_panel import show_admin_panel
 from bot.decorators import admin_only, is_admin, log_call
+from config import settings
 from integrations import plan_mapping
 from integrations.whop_api import WhopAPIError, WhopClient
 
@@ -186,10 +187,10 @@ async def cmd_topicid(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     thread = msg.message_thread_id
     topic_lines = [
         ("TELEGRAM_TOPIC_WELCOME", "Welcome"),
-        ("TELEGRAM_TOPIC_COPYTRADING", "Copy Trading"),
-        ("TELEGRAM_TOPIC_SUPPORT", "Support"),
-        ("TELEGRAM_TOPIC_SIGNALS", "Signals"),
-        ("TELEGRAM_TOPIC_EDUCATION", "Education"),
+        ("TELEGRAM_TOPIC_COPYTRADING", "Copy Trading (admin-only)"),
+        ("TELEGRAM_TOPIC_SUPPORT", "Support (admin-only)"),
+        ("TELEGRAM_TOPIC_SIGNALS", "Signals (admin-only)"),
+        ("TELEGRAM_TOPIC_EDUCATION", "Members Community (members chat OK)"),
         ("TELEGRAM_TOPIC_NOTIFICATIONS", "Daily Notifications"),
         ("TELEGRAM_TOPIC_PNL", "PnL (optional)"),
     ]
@@ -208,12 +209,51 @@ async def cmd_topicid(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         topic_block = (
             "<i>Open a named topic (not General), then run /topicid again.</i>"
         )
+    from bot import group_moderation
+
+    mod_block = group_moderation.moderation_summary().replace("\n", "\n• ")
     await update.message.reply_text(
         "📌 <b>IDs for .env</b>\n\n"
         f"TELEGRAM_MAIN_GROUP_ID=<code>{chat.id}</code>\n\n"
         f"{topic_block}\n\n"
         "<b>Topic keys (pick one per topic):</b>\n"
-        f"{keys_block}",
+        f"{keys_block}\n\n"
+        "<b>Group moderation:</b>\n"
+        f"• {mod_block}",
+        parse_mode=ParseMode.HTML,
+    )
+
+
+@log_call
+async def cmd_create_members_topic(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    """Create a new Members Community forum topic in the main group."""
+    if not await _can_run_topicid(update, context):
+        await update.message.reply_text(texts.UNAUTHORIZED)
+        return
+
+    gid = settings.telegram_main_group_id
+    if not gid:
+        await update.message.reply_text("Set TELEGRAM_MAIN_GROUP_ID in .env first.")
+        return
+
+    name = " ".join(context.args).strip() if context.args else "Members Community"
+    try:
+        topic = await context.bot.create_forum_topic(chat_id=gid, name=name)
+    except Exception as e:
+        await update.message.reply_text(
+            f"Could not create topic: {e}\n\n"
+            "Bot must be group admin with Manage Topics permission."
+        )
+        return
+
+    thread_id = topic.message_thread_id
+    await update.message.reply_text(
+        f"✅ Created forum topic <b>{name}</b>\n\n"
+        f"Set in Railway:\n"
+        f"<code>TELEGRAM_TOPIC_EDUCATION={thread_id}</code>\n\n"
+        "Then redeploy. Members can chat in this topic only.",
         parse_mode=ParseMode.HTML,
     )
 

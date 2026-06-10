@@ -1,7 +1,11 @@
 """
 Delete non-admin messages in moderated community groups.
 
-Main group: members may chat only in configured topics (e.g. Members Community).
+Main group:
+    * Members may chat in TELEGRAM_TOPIC_EDUCATION (+ optional extras).
+    * Non-admin messages are deleted in Signals, Copy Trading, and Support.
+    * Other topics stay admin-only (same as before).
+
 Welcome group: all topics are admin-only (read + pinned Whop link).
 """
 
@@ -18,37 +22,52 @@ from telegram.ext import ContextTypes
 from bot.channel_context import is_main_group, is_welcome_group
 from config import settings
 
-# Forum topics where members may chat (e.g. Members Community / education).
-_MEMBER_CHAT_TOPIC_IDS: frozenset[int] | None = None
-
-
-def _member_chat_topic_ids() -> frozenset[int]:
-    global _MEMBER_CHAT_TOPIC_IDS
-    if _MEMBER_CHAT_TOPIC_IDS is None:
-        ids: set[int] = set()
-        tid = settings.telegram_topic_education
-        if isinstance(tid, int):
-            ids.add(tid)
-        extra = (settings.group_moderation_member_chat_topics_csv or "").strip()
-        if extra:
-            for part in extra.split(","):
-                part = part.strip()
-                if part.isdigit():
-                    ids.add(int(part))
-        _MEMBER_CHAT_TOPIC_IDS = frozenset(ids)
-    return _MEMBER_CHAT_TOPIC_IDS
-
-
-def _is_member_chat_topic(msg: Message) -> bool:
-    allowed = _member_chat_topic_ids()
-    if not allowed or not msg.message_thread_id:
-        return False
-    return msg.message_thread_id in allowed
-
 _ADMIN_STATUSES: Final = frozenset({"creator", "administrator"})
 # (chat_id, user_id) -> (allowed, monotonic expiry)
 _post_cache: dict[tuple[int, int], tuple[bool, float]] = {}
 _CACHE_TTL_SEC = 300.0
+
+
+def member_chat_topic_ids() -> frozenset[int]:
+    """Forum topics where members may chat (Members Community)."""
+    ids: set[int] = set()
+    tid = settings.telegram_topic_education
+    if isinstance(tid, int):
+        ids.add(tid)
+    extra = (settings.group_moderation_member_chat_topics_csv or "").strip()
+    if extra:
+        for part in extra.split(","):
+            part = part.strip()
+            if part.isdigit():
+                ids.add(int(part))
+    return frozenset(ids)
+
+
+def admin_only_topic_ids() -> frozenset[int]:
+    """Forum topics where member messages are always deleted (buyer request)."""
+    ids: set[int] = set()
+    for tid in (
+        settings.telegram_topic_signals,
+        settings.telegram_topic_copytrading,
+        settings.telegram_topic_support,
+    ):
+        if isinstance(tid, int):
+            ids.add(tid)
+    return frozenset(ids)
+
+
+def _is_member_chat_topic(msg: Message) -> bool:
+    allowed = member_chat_topic_ids()
+    if not allowed or not msg.message_thread_id:
+        return False
+    return msg.message_thread_id in allowed
+
+
+def _is_admin_only_topic(msg: Message) -> bool:
+    moderated = admin_only_topic_ids()
+    if not moderated or not msg.message_thread_id:
+        return False
+    return msg.message_thread_id in moderated
 
 
 def _configured_bot_admins() -> frozenset[int]:
@@ -97,11 +116,31 @@ async def user_may_post_in_group(
     return await _telegram_group_admin(context, chat_id, user_id)
 
 
+def should_delete_member_message(msg: Message, *, main_group: bool) -> bool:
+    """
+    Return True when a non-admin member message should be deleted.
+
+    Welcome group: always delete member messages.
+    Main group: allow Members Community; delete signals/copy/support + other topics.
+    """
+    if not main_group:
+        return True
+
+    if _is_member_chat_topic(msg):
+        return False
+
+    if _is_admin_only_topic(msg):
+        return True
+
+    # General lane + other admin-only topics (PnL, notifications, etc.)
+    return True
+
+
 async def _moderate_message(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
     *,
-    allow_member_chat_topics: bool,
+    main_group: bool,
 ) -> None:
     if not settings.group_moderation_enabled:
         return
@@ -111,16 +150,17 @@ async def _moderate_message(
     if not msg or not user or user.is_bot:
         return
 
-    if allow_member_chat_topics and _is_member_chat_topic(msg):
-        return
-
     if await user_may_post_in_group(context, msg.chat_id, user.id):
         return
 
+    if not should_delete_member_message(msg, main_group=main_group):
+        return
+
     await _delete_message(msg)
-    logger.debug(
+    logger.info(
         f"group_moderation: deleted message {msg.message_id} "
-        f"from user {user.id} in chat {msg.chat_id}"
+        f"from user {user.id} in chat {msg.chat_id} "
+        f"thread {msg.message_thread_id}"
     )
 
 
@@ -129,7 +169,7 @@ async def on_main_group_message(
 ) -> None:
     if not is_main_group(update):
         return
-    await _moderate_message(update, context, allow_member_chat_topics=True)
+    await _moderate_message(update, context, main_group=True)
 
 
 async def on_welcome_group_message(
@@ -137,4 +177,15 @@ async def on_welcome_group_message(
 ) -> None:
     if not is_welcome_group(update):
         return
-    await _moderate_message(update, context, allow_member_chat_topics=False)
+    await _moderate_message(update, context, main_group=False)
+
+
+def moderation_summary() -> str:
+    """Human-readable summary for /topicid and logs."""
+    allowed = sorted(member_chat_topic_ids())
+    blocked = sorted(admin_only_topic_ids())
+    lines = [
+        f"Members chat allowed: {allowed or 'NOT SET — set TELEGRAM_TOPIC_EDUCATION'}",
+        f"Admin-only (delete member msgs): {blocked or 'none configured'}",
+    ]
+    return "\n".join(lines)

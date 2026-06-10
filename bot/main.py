@@ -168,6 +168,7 @@ def build_app() -> Application:
     app.add_handler(CommandHandler("airtable_setup", admin.cmd_airtable_setup))
     app.add_handler(CommandHandler("status", admin.cmd_status))
     app.add_handler(CommandHandler("topicid", admin.cmd_topicid))
+    app.add_handler(CommandHandler("create_members_topic", admin.cmd_create_members_topic))
 
     app.add_handler(CommandHandler("expense", finance.cmd_expense))
     app.add_handler(CommandHandler("revenue", finance.cmd_revenue))
@@ -214,8 +215,8 @@ def build_app() -> Application:
                 group=-1,
             )
             logger.info(
-                f"Group moderation ON for main group {settings.telegram_main_group_id} "
-                "(non-admin messages deleted; Members Community topic allowed)"
+                f"Group moderation ON for main group {settings.telegram_main_group_id}\n"
+                f"{group_moderation.moderation_summary()}"
             )
 
     if settings.telegram_welcome_group_id and settings.group_moderation_enabled:

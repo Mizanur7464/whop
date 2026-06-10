@@ -87,6 +87,7 @@ ADMIN_COMMANDS: list[BotCommand] = MEMBER_DM_COMMANDS + [
     BotCommand("airtable_setup", "Add missing Airtable columns"),
     BotCommand("status", "Build status"),
     BotCommand("topicid", "Show group + topic IDs for .env"),
+    BotCommand("create_members_topic", "Create Members Community topic"),
 ]
 
 
