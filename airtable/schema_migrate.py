@@ -65,7 +65,18 @@ def _recreate_select_field(
         return None
 
     try:
-        api.delete(f"meta/bases/{base_id}/tables/{api_table.id}/fields/{field.id}")
+        delete_url = str(
+            api.build_url(
+                "meta",
+                "bases",
+                base_id,
+                "tables",
+                api_table.id,
+                "fields",
+                field.id,
+            )
+        )
+        api.delete(delete_url)
         api_table.create_field(
             field_name,
             "singleSelect",
