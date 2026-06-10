@@ -165,6 +165,7 @@ def build_app() -> Application:
     app.add_handler(CommandHandler("claims", claim.cmd_pending_claims))
     app.add_handler(CommandHandler("reload_config", admin.cmd_reload_config))
     app.add_handler(CommandHandler("airtable_check", admin.cmd_airtable_check))
+    app.add_handler(CommandHandler("airtable_setup", admin.cmd_airtable_setup))
     app.add_handler(CommandHandler("status", admin.cmd_status))
     app.add_handler(CommandHandler("topicid", admin.cmd_topicid))
 

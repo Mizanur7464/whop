@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-Create the CRM tables in the Airtable base from .env (if missing).
+Create / update Airtable CRM tables from .env.
 
 Usage:
     python scripts/setup_airtable.py
 
-Requires AIRTABLE_API_KEY with access to AIRTABLE_BASE_ID and permission
-to create tables (schema.bases:write or full base access on the token).
+Creates missing tables and adds any missing columns on existing tables.
+Requires AIRTABLE_API_KEY with ``schema.bases:write`` on the base.
 """
 
 from __future__ import annotations
@@ -17,158 +17,31 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from pyairtable import Api
-
-from config import settings
-
-
-def _select(name: str, choices: list[str]) -> dict:
-    return {
-        "name": name,
-        "type": "singleSelect",
-        "options": {"choices": [{"name": c} for c in choices]},
-    }
-
-
-def _date(name: str) -> dict:
-    return {
-        "name": name,
-        "type": "dateTime",
-        "options": {
-            "dateFormat": {"name": "iso"},
-            "timeFormat": {"name": "24hour"},
-            "timeZone": "utc",
-        },
-    }
-
-
-def _number(name: str, precision: int = 2) -> dict:
-    return {
-        "name": name,
-        "type": "number",
-        "options": {"precision": precision},
-    }
-
-
-def _checkbox(name: str) -> dict:
-    return {
-        "name": name,
-        "type": "checkbox",
-        "options": {"icon": "check", "color": "greenBright"},
-    }
-
-
-def _link(name: str, linked_table_id: str) -> dict:
-    return {
-        "name": name,
-        "type": "multipleRecordLinks",
-        "options": {"linkedTableId": linked_table_id},
-    }
-
-
-def members_fields() -> list[dict]:
-    return [
-        {"name": "Telegram User ID", "type": "singleLineText"},
-        {"name": "Telegram Username", "type": "singleLineText"},
-        {"name": "Name", "type": "singleLineText"},
-        {"name": "Email", "type": "email"},
-        {"name": "Phone", "type": "singleLineText"},
-        _select("Platform", ["Vantage", "Premier"]),
-        {"name": "Platform User ID", "type": "singleLineText"},
-        {"name": "Whop User ID", "type": "singleLineText"},
-        {"name": "Whop Membership ID", "type": "singleLineText"},
-        _select("Plan", ["Basic", "Premium", "VIP", "unknown"]),
-        _select("Status", ["Active", "Expired", "Banned", "Pending"]),
-        _date("Join Date"),
-        _checkbox("Onboarding Completed"),
-        _date("Onboarding Completed At"),
-        _date("Last Activity"),
-        _number("Reminders Sent", precision=0),
-        _checkbox("Cancel At Period End"),
-        {"name": "Notes", "type": "multilineText"},
-    ]
-
-
-def finance_fields(members_table_id: str) -> list[dict]:
-    return [
-        {"name": "Entry ID", "type": "singleLineText"},
-        _select("Type", ["Payment", "Expense"]),
-        _link("Member", members_table_id),
-        _number("Amount"),
-        _number("Fees"),
-        _number("Net Amount"),
-        _select("Currency", ["EUR", "USD", "GBP"]),
-        _date("Date"),
-        {"name": "Whop User ID", "type": "singleLineText"},
-        {"name": "Plan", "type": "singleLineText"},
-        _select("Status", ["Succeeded", "Failed", "Refunded"]),
-        _select("Category", ["Ads", "Tools", "Salary", "Software", "Hosting", "Other"]),
-        {"name": "Description", "type": "multilineText"},
-        {"name": "Added By", "type": "singleLineText"},
-        {"name": "Notes", "type": "multilineText"},
-    ]
-
-
-def checklist_fields(members_table_id: str) -> list[dict]:
-    return [
-        {"name": "Telegram User ID", "type": "singleLineText"},
-        {"name": "Task ID", "type": "singleLineText"},
-        {"name": "Task Title", "type": "singleLineText"},
-        _checkbox("Completed"),
-        _date("Completed At"),
-        _link("Member", members_table_id),
-    ]
+from airtable.schema_migrate import migrate_airtable_schema
 
 
 def main() -> int:
-    if not settings.airtable_api_key or not settings.airtable_base_id:
-        print("Set AIRTABLE_API_KEY and AIRTABLE_BASE_ID in .env first.")
+    report = migrate_airtable_schema(create_missing_tables=True)
+    if report.get("reason"):
+        print(f"Error: {report['reason']}")
         return 1
 
-    api = Api(settings.airtable_api_key)
-    base = api.base(settings.airtable_base_id)
-    existing = {t.name for t in base.schema().tables}
-    print(f"Base {settings.airtable_base_id} — existing tables: {sorted(existing)}")
-
-    plan = [
-        (settings.airtable_members_table, None),
-        (settings.airtable_finance_table, "members"),
-        (settings.airtable_checklist_table, "members"),
-    ]
-
-    created_ids: dict[str, str] = {}
-
-    for table_name, needs_members in plan:
-        if table_name in existing:
-            tbl = base.table(table_name)
-            created_ids[table_name] = tbl.id
-            print(f"  skip {table_name} (already exists)")
-            continue
-
-        if needs_members == "members":
-            members_name = settings.airtable_members_table
-            if members_name not in created_ids:
-                print(f"  error: create {members_name} before {table_name}")
-                return 1
-            if table_name == settings.airtable_finance_table:
-                fields = finance_fields(created_ids[members_name])
-            else:
-                fields = checklist_fields(created_ids[members_name])
-        elif table_name == settings.airtable_members_table:
-            fields = members_fields()
-        else:
-            print(f"  unknown table plan for {table_name}")
-            return 1
-
-        print(f"  creating {table_name}...")
-        tbl = base.create_table(table_name, fields=fields)
-        created_ids[table_name] = tbl.id
-        print(f"  created {table_name} ({tbl.id})")
+    print(f"Base schema sync — ok={report.get('ok')}")
+    for table_name, info in report.get("tables", {}).items():
+        if info.get("created"):
+            print(f"  created table {table_name}")
+        added = info.get("added") or []
+        if added:
+            print(f"  {table_name}: added {', '.join(added)}")
+        errors = info.get("errors") or []
+        for err in errors:
+            print(f"  {table_name}: ERROR {err}")
+        error = info.get("error")
+        if error:
+            print(f"  {table_name}: ERROR {error}")
 
     print("\nDone. Run /airtable_check in Telegram to verify.")
-    if "Table 1" in existing or "MembersTest" in existing:
-        print("Optional: delete unused tables 'Table 1' / 'MembersTest' in Airtable UI.")
-    return 0
+    return 0 if report.get("ok") else 1
 
 
 if __name__ == "__main__":

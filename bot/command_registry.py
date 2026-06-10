@@ -84,6 +84,7 @@ ADMIN_COMMANDS: list[BotCommand] = MEMBER_DM_COMMANDS + [
     BotCommand("expenses", "Expense summary"),
     BotCommand("pnl", "Profit & loss summary"),
     BotCommand("airtable_check", "Validate Airtable schema"),
+    BotCommand("airtable_setup", "Add missing Airtable columns"),
     BotCommand("status", "Build status"),
     BotCommand("topicid", "Show group + topic IDs for .env"),
 ]

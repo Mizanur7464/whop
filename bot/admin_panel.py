@@ -87,7 +87,8 @@ _SECTIONS: dict[str, str] = {
         "<code>/revenue [days]</code> — Revenue summary (default 30 days)\n"
         "<code>/expenses [days]</code> — Expense summary\n"
         "<code>/pnl [days]</code> — Profit &amp; loss\n"
-        "<code>/airtable_check</code> — Validate base tables &amp; fields\n\n"
+        "<code>/airtable_check</code> — Validate base tables &amp; fields\n"
+        "<code>/airtable_setup</code> — Auto-add missing columns\n\n"
         "Requires <code>AIRTABLE_API_KEY</code>, <code>AIRTABLE_BASE_ID</code>, "
         "and <code>pyairtable</code>."
     ),

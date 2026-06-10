@@ -26,6 +26,7 @@ bot will write into. Total time: ~15 minutes.
    - `data.records:read`
    - `data.records:write`
    - `schema.bases:read`
+   - `schema.bases:write` (required for `/airtable_setup` and `setup_airtable.py`)
 5. **Access** — add the base you created in step 1.
 6. Click **Create token**, copy the token (starts with `pat...`).
 7. Paste into `.env` as `AIRTABLE_API_KEY`.
@@ -37,7 +38,9 @@ bot will write into. Total time: ~15 minutes.
 Delete the default `Table 1` Airtable made, then create these tables.
 Field names must match **exactly** — they're case-sensitive.
 
-Or run `python scripts/setup_airtable.py` to auto-create them.
+Or run `python scripts/setup_airtable.py` to auto-create tables **and add missing columns**.
+
+In Telegram (admin): `/airtable_setup` does the same — buyer does not need the Airtable UI.
 
 ### Table 1 — `Members`
 
@@ -84,7 +87,7 @@ All revenue and costs live here for easy P&amp;L (filter by **Type**).
 | Added By | Single line text | Expenses only — admin Telegram handle |
 | Notes | Long text | |
 
-Set `AIRTABLE_FINANCE_TABLE=Finance` in `.env` (default).
+Set `AIRTABLE_FINANCE_TABLE=Payments` in `.env` (default). Legacy name `Finance` also works.
 
 ### Table 3 — `Checklist`
 

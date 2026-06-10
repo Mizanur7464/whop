@@ -279,6 +279,12 @@ async def cmd_airtable_check(update: Update, _: ContextTypes.DEFAULT_TYPE) -> No
     overall = "✅ All good" if report.get("all_ok") else "⚠️ Issues found"
     lines.append("")
     lines.append(f"*Overall:* {overall}")
+    if not report.get("all_ok"):
+        lines.append("")
+        lines.append(
+            "Fix automatically: `/airtable_setup` \\(needs token scope "
+            "`schema.bases:write`\\)"
+        )
     if report.get("all_ok"):
         lines.append("")
         lines.append(
@@ -291,6 +297,55 @@ async def cmd_airtable_check(update: Update, _: ContextTypes.DEFAULT_TYPE) -> No
             "6. P&amp;L: `/pnl 30`"
         )
 
+    await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN)
+
+
+# ---------- /airtable_setup ----------
+
+@admin_only
+@log_call
+async def cmd_airtable_setup(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
+    """Create missing Airtable tables/columns (one-click schema sync)."""
+    import asyncio
+
+    from airtable.schema_migrate import migrate_airtable_schema
+
+    await update.message.reply_text(
+        "Syncing Airtable schema… this may take a minute."
+    )
+
+    report = await asyncio.to_thread(
+        migrate_airtable_schema, create_missing_tables=True
+    )
+
+    if report.get("reason"):
+        await update.message.reply_text(
+            f"❌ {report['reason']}",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+        return
+
+    lines = ["*Airtable Schema Setup*", ""]
+    for table_name, info in report.get("tables", {}).items():
+        errors = info.get("errors") or []
+        error = info.get("error")
+        added = info.get("added") or []
+        if info.get("created"):
+            icon = "✅"
+            detail = f"created table \\({len(added)} fields\\)"
+        elif errors or error:
+            icon = "❌"
+            detail = error or "; ".join(errors[:3])
+        elif added:
+            icon = "✅"
+            detail = f"added: `{', '.join(added)}`"
+        else:
+            icon = "✅"
+            detail = "already up to date"
+        lines.append(f"{icon} *{table_name}* — {detail}")
+
+    overall = "✅ Done" if report.get("ok") else "⚠️ Some fields failed"
+    lines.extend(["", f"*Overall:* {overall}", "", "Run `/airtable_check` to verify."])
     await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN)
 
 

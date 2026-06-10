@@ -627,10 +627,25 @@ class AirtableClient:
 
     # ---------- Schema validation ----------
 
+    @staticmethod
+    def _required_schema_fields(short: str) -> list[str]:
+        required = list(ALL_TABLES[short])
+        if short == "finance":
+            from airtable.schema_fields import finance_entry_id_field_name
+
+            entry_name = finance_entry_id_field_name()
+            required = [
+                entry_name if field == FinanceField.ENTRY_ID else field
+                for field in required
+            ]
+        return required
+
     async def validate_schema(self) -> dict:
         """Probe each configured table and confirm required fields exist."""
         if not self.enabled:
             return {"ok": False, "reason": "Airtable client not configured"}
+
+        from airtable.schema_fields import field_is_present
 
         results: dict[str, dict] = {}
         table_map = {
@@ -639,28 +654,28 @@ class AirtableClient:
             "checklist": settings.airtable_checklist_table,
         }
 
+        base_schema = await self._run(self._base.schema)
+        if base_schema is None:
+            return {"ok": False, "reason": "Could not read Airtable base schema"}
+
         for short, table_name in table_map.items():
-            required = ALL_TABLES[short]
+            required = self._required_schema_fields(short)
             try:
-                table = self._base.table(table_name)
-                sample = await self._run(table.first)
-                if sample is None:
-                    results[short] = {
-                        "ok": True,
-                        "table": table_name,
-                        "note": "empty (could not verify fields)",
-                        "missing": [],
-                    }
-                    continue
-                present = set((sample.get("fields") or {}).keys())
-                missing = [f for f in required if f not in present]
-                if short == "finance":
-                    if FinanceField.ENTRY_ID in missing and "Payment ID" in present:
-                        missing.remove(FinanceField.ENTRY_ID)
+                table_schema = base_schema.table(table_name)
+                present = {field.name for field in table_schema.fields}
+                missing = [
+                    field for field in required if not field_is_present(field, present)
+                ]
                 results[short] = {
                     "ok": not missing,
                     "table": table_name,
                     "missing": missing,
+                }
+            except KeyError:
+                results[short] = {
+                    "ok": False,
+                    "table": table_name,
+                    "error": f"Table '{table_name}' not found in base",
                 }
             except Exception as e:
                 results[short] = {
