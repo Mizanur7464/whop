@@ -158,6 +158,120 @@ class AirtableClient:
 
     # ---------- Members ----------
 
+    PLACEHOLDER_TG_PREFIX = "whop:"
+
+    @classmethod
+    def _is_placeholder_telegram_id(cls, telegram_user_id: str | None) -> bool:
+        return bool(
+            telegram_user_id
+            and str(telegram_user_id).startswith(cls.PLACEHOLDER_TG_PREFIX)
+        )
+
+    @classmethod
+    def _placeholder_telegram_id(cls, whop_user_id: str) -> str:
+        return f"{cls.PLACEHOLDER_TG_PREFIX}{whop_user_id}"
+
+    async def find_member_by_whop_user_id(self, whop_user_id: str) -> Optional[dict]:
+        if not self.enabled:
+            return None
+        table = self._table(settings.airtable_members_table)
+        match_formula = match({MembersField.WHOP_USER_ID: whop_user_id})
+        return await self._run(table.first, formula=match_formula)
+
+    async def upsert_whop_member(
+        self,
+        *,
+        whop_user_id: str,
+        whop_membership_id: str | None = None,
+        plan: str | None = None,
+        status: MemberStatus | str | None = None,
+        join_date: str | None = None,
+        email: str | None = None,
+        name: str | None = None,
+        phone: str | None = None,
+        telegram_user_id: int | None = None,
+        telegram_username: str | None = None,
+        telegram_claimed: bool | None = None,
+        platform: str | None = None,
+        platform_user_id: str | None = None,
+    ) -> Optional[dict]:
+        """Create-or-update a Members row keyed by Whop User ID."""
+        if not self.enabled:
+            return None
+
+        existing = await self.find_member_by_whop_user_id(whop_user_id)
+        table = self._table(settings.airtable_members_table)
+        if not existing and telegram_user_id:
+            existing = await self._run(
+                table.first,
+                formula=match({MembersField.TELEGRAM_USER_ID: str(telegram_user_id)}),
+            )
+
+        fields: dict[str, Any] = {
+            MembersField.WHOP_USER_ID: whop_user_id,
+            MembersField.LAST_ACTIVITY: datetime.now(timezone.utc).isoformat(),
+        }
+        if whop_membership_id:
+            fields[MembersField.WHOP_MEMBERSHIP_ID] = whop_membership_id
+        plan_value = self._plan_field(plan)
+        if plan_value:
+            fields[MembersField.PLAN] = plan_value
+        if status is not None:
+            fields[MembersField.STATUS] = (
+                status.value if isinstance(status, MemberStatus) else str(status)
+            )
+        elif not existing:
+            fields[MembersField.STATUS] = MemberStatus.PENDING.value
+        if join_date:
+            fields[MembersField.JOIN_DATE] = join_date
+        if email:
+            fields[MembersField.EMAIL] = email
+        if name:
+            fields[MembersField.NAME] = name
+        if phone:
+            fields[MembersField.PHONE] = phone
+        platform_value = normalize_trading_platform(platform)
+        if platform_value:
+            fields[MembersField.PLATFORM] = platform_value
+        if platform_user_id:
+            fields[MembersField.PLATFORM_USER_ID] = platform_user_id.strip()
+        if telegram_username:
+            fields[MembersField.TELEGRAM_USERNAME] = telegram_username
+        if telegram_claimed is not None:
+            fields[MembersField.TELEGRAM_CLAIMED] = telegram_claimed
+
+        if telegram_user_id:
+            fields[MembersField.TELEGRAM_USER_ID] = str(telegram_user_id)
+        elif not existing:
+            fields[MembersField.TELEGRAM_USER_ID] = self._placeholder_telegram_id(
+                whop_user_id
+            )
+        else:
+            existing_tg = (existing.get("fields") or {}).get(
+                MembersField.TELEGRAM_USER_ID
+            )
+            if not existing_tg or self._is_placeholder_telegram_id(str(existing_tg)):
+                fields[MembersField.TELEGRAM_USER_ID] = self._placeholder_telegram_id(
+                    whop_user_id
+                )
+
+        optional_keys = {
+            MembersField.PHONE,
+            MembersField.PLATFORM,
+            MembersField.PLATFORM_USER_ID,
+            MembersField.TELEGRAM_CLAIMED,
+        }
+        if existing:
+            result = await self._run(table.update, existing["id"], fields)
+        else:
+            result = await self._run(table.create, fields)
+        if result is None and any(k in fields for k in optional_keys):
+            slim = {k: v for k, v in fields.items() if k not in optional_keys}
+            if existing:
+                return await self._run(table.update, existing["id"], slim)
+            return await self._run(table.create, slim)
+        return result
+
     async def upsert_member(
         self,
         *,
@@ -173,8 +287,27 @@ class AirtableClient:
         phone: str | None = None,
         platform: str | None = None,
         platform_user_id: str | None = None,
+        telegram_claimed: bool | None = None,
     ) -> Optional[dict]:
-        """Create-or-update a Members row by Telegram User ID."""
+        """Create-or-update a Members row (Whop row when whop_user_id is set)."""
+        if whop_user_id:
+            claimed = True if telegram_claimed is None else telegram_claimed
+            return await self.upsert_whop_member(
+                whop_user_id=whop_user_id,
+                whop_membership_id=whop_membership_id,
+                plan=plan,
+                status=status,
+                join_date=join_date,
+                email=email,
+                name=name,
+                phone=phone,
+                telegram_user_id=telegram_user_id,
+                telegram_username=telegram_username,
+                telegram_claimed=claimed,
+                platform=platform,
+                platform_user_id=platform_user_id,
+            )
+
         if not self.enabled:
             return None
 
@@ -185,8 +318,6 @@ class AirtableClient:
             fields[MembersField.TELEGRAM_USERNAME] = telegram_username
         if name:
             fields[MembersField.NAME] = name
-        if whop_user_id:
-            fields[MembersField.WHOP_USER_ID] = whop_user_id
         if whop_membership_id:
             fields[MembersField.WHOP_MEMBERSHIP_ID] = whop_membership_id
         plan_value = self._plan_field(plan)
@@ -207,6 +338,8 @@ class AirtableClient:
             fields[MembersField.PLATFORM] = platform_value
         if platform_user_id:
             fields[MembersField.PLATFORM_USER_ID] = platform_user_id.strip()
+        if telegram_claimed is not None:
+            fields[MembersField.TELEGRAM_CLAIMED] = telegram_claimed
         fields[MembersField.LAST_ACTIVITY] = datetime.now(timezone.utc).isoformat()
 
         table = self._table(settings.airtable_members_table)
@@ -217,6 +350,7 @@ class AirtableClient:
             MembersField.PHONE,
             MembersField.PLATFORM,
             MembersField.PLATFORM_USER_ID,
+            MembersField.TELEGRAM_CLAIMED,
         }
         if existing:
             result = await self._run(table.update, existing["id"], fields)
@@ -357,6 +491,7 @@ class AirtableClient:
             MembersField.ONBOARDING_COMPLETED: True,
             MembersField.ONBOARDING_COMPLETED_AT: completed_at,
             MembersField.STATUS: MemberStatus.ACTIVE.value,
+            MembersField.TELEGRAM_CLAIMED: True,
             MembersField.LAST_ACTIVITY: completed_at,
         }
         plan_value = self._plan_field(plan)

@@ -31,6 +31,7 @@ class MembersField:
     JOIN_DATE = "Join Date"
     ONBOARDING_COMPLETED = "Onboarding Completed"
     ONBOARDING_COMPLETED_AT = "Onboarding Completed At"
+    TELEGRAM_CLAIMED = "Telegram Claimed"
     LAST_ACTIVITY = "Last Activity"
     REMINDERS_SENT = "Reminders Sent"
     CANCEL_AT_PERIOD_END = "Cancel At Period End"
@@ -159,6 +160,7 @@ ALL_TABLES = {
         MembersField.PLAN,
         MembersField.STATUS,
         MembersField.JOIN_DATE,
+        MembersField.TELEGRAM_CLAIMED,
     ],
         "finance": [
             FinanceField.ENTRY_ID,

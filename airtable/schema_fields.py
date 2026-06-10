@@ -77,6 +77,7 @@ def members_fields() -> list[dict]:
         _select("Plan", ["Basic", "Premium", "VIP", "unknown"]),
         _select("Status", ["Active", "Expired", "Banned", "Pending"]),
         _date("Join Date"),
+        _checkbox("Telegram Claimed"),
         _checkbox("Onboarding Completed"),
         _date("Onboarding Completed At"),
         _date("Last Activity"),

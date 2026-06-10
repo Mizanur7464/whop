@@ -49,22 +49,90 @@ async def member_joined(
     if not c.enabled:
         return
     try:
-        await c.upsert_member(
-            telegram_user_id=telegram_user_id,
-            telegram_username=telegram_username,
-            name=name,
-            whop_user_id=whop_user_id,
-            whop_membership_id=whop_membership_id,
-            plan=plan,
-            status=MemberStatus.ACTIVE,
-            join_date=datetime.now(timezone.utc).isoformat(),
-            email=email,
-        )
+        if whop_user_id:
+            await c.upsert_whop_member(
+                whop_user_id=whop_user_id,
+                whop_membership_id=whop_membership_id,
+                plan=plan,
+                status=MemberStatus.ACTIVE,
+                join_date=datetime.now(timezone.utc).isoformat(),
+                email=email,
+                name=name,
+                telegram_user_id=telegram_user_id,
+                telegram_username=telegram_username,
+                telegram_claimed=True,
+            )
+        else:
+            await c.upsert_member(
+                telegram_user_id=telegram_user_id,
+                telegram_username=telegram_username,
+                name=name,
+                whop_membership_id=whop_membership_id,
+                plan=plan,
+                status=MemberStatus.ACTIVE,
+                join_date=datetime.now(timezone.utc).isoformat(),
+                email=email,
+                telegram_claimed=True,
+            )
         logger.info(
             f"Airtable: member_joined tg={telegram_user_id} plan={plan} email={email!r}"
         )
     except Exception as e:
         logger.warning(f"Airtable member_joined failed: {e}")
+
+
+async def sync_whop_membership(
+    *,
+    whop_user_id: str,
+    whop_membership_id: str | None = None,
+    plan: str | None = None,
+    email: str | None = None,
+    name: str | None = None,
+    phone: str | None = None,
+    join_date: str | None = None,
+    telegram_user_id: int | None = None,
+    telegram_username: str | None = None,
+    telegram_claimed: bool = False,
+    status: MemberStatus | str = MemberStatus.ACTIVE,
+) -> None:
+    """Upsert a Whop member into Airtable (claimed or awaiting Telegram /claim)."""
+    c = client()
+    if not c.enabled:
+        return
+    try:
+        await c.upsert_whop_member(
+            whop_user_id=whop_user_id,
+            whop_membership_id=whop_membership_id,
+            plan=plan,
+            email=email,
+            name=name,
+            phone=phone,
+            join_date=join_date or datetime.now(timezone.utc).isoformat(),
+            telegram_user_id=telegram_user_id,
+            telegram_username=telegram_username,
+            telegram_claimed=telegram_claimed,
+            status=status,
+        )
+        logger.info(
+            f"Airtable: whop sync whop={whop_user_id} claimed={telegram_claimed}"
+        )
+    except Exception as e:
+        logger.warning(f"Airtable sync_whop_membership failed: {e}")
+
+
+async def whop_membership_ended(whop_user_id: str) -> None:
+    """Mark an Airtable row expired when Whop membership ends (linked or not)."""
+    c = client()
+    if not c.enabled:
+        return
+    try:
+        await c.upsert_whop_member(
+            whop_user_id=whop_user_id,
+            status=MemberStatus.EXPIRED,
+        )
+        logger.info(f"Airtable: whop membership ended whop={whop_user_id}")
+    except Exception as e:
+        logger.warning(f"Airtable whop_membership_ended failed: {e}")
 
 
 async def member_status_changed(telegram_user_id: int, status: str) -> None:

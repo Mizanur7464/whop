@@ -261,6 +261,20 @@ async def on_membership_valid(payload: dict) -> None:
             f"(main group invite after onboarding approval)"
         )
 
+    from integrations.whop_member_profile import profile_from_membership
+
+    profile = profile_from_membership(entity)
+    await airtable_sync.sync_whop_membership(
+        whop_user_id=whop_user,
+        whop_membership_id=membership_id,
+        plan=plan_name,
+        email=checkout_email or profile.email,
+        name=profile.name,
+        phone=profile.phone,
+        join_date=profile.join_date,
+        telegram_claimed=False,
+    )
+
     from integrations.whop_success_page import public_app_base_url
 
     bot_username = (settings.telegram_bot_username or "").lstrip("@")
@@ -297,6 +311,7 @@ async def on_membership_invalid(payload: dict) -> None:
     tg_id = storage.get_telegram_id_for_whop_user(whop_user)
     if tg_id is None:
         logger.info(f"membership.went_invalid for unlinked whop_user={whop_user}")
+        await airtable_sync.whop_membership_ended(whop_user)
         return
 
     chats = plan_mapping.resolve_chats_for_product(product_id)

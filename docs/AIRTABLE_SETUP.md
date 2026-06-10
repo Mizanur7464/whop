@@ -57,7 +57,8 @@ In Telegram (admin): `/airtable_setup` does the same — buyer does not need the
 | Whop Membership ID | Single line text | |
 | Plan | Single select | Options: Basic, Premium, VIP, unknown |
 | Status | Single select | Options: Active, Expired, Banned, Pending |
-| Join Date | Date (include time) | |
+| Join Date | Date (include time) | Whop membership start |
+| Telegram Claimed | Checkbox | Checked after user runs `/claim` in Telegram |
 | Onboarding Completed | Checkbox | |
 | Onboarding Completed At | Date (include time) | |
 | Last Activity | Date (include time) | |
@@ -106,6 +107,7 @@ Set `AIRTABLE_FINANCE_TABLE=Payments` in `.env` (default). Legacy name `Finance`
 
 ### Members
 - **Active members** — Filter: `Status = Active`
+- **Not claimed yet** — Filter: `Telegram Claimed = false`
 - **Onboarding pending** — Filter: `Onboarding Completed = false`
 - **By platform** — Group by `Platform`
 
@@ -138,11 +140,12 @@ You should see ✅ for **Members**, **Finance**, and **Checklist**.
 
 ## 7. Test Member Sync (status, plan, platform)
 
-1. **Claim Whop** (or test purchase) → new row in **Members**, **Status = Active**
-2. **`/onboarding`** → pick location (Inside UAE = Vantage PDF, Outside = Premier PDF)
-3. Enter **email → phone → platform user ID** → check **Members** for Phone, Platform, Platform User ID
-4. Complete checklist → T&amp;C → send screenshot → admin **Approve**
-5. **Members** should show **Status = Active**, **Onboarding Completed = checked**, correct **Plan**
+1. **Claim Whop** (or test purchase) → row in **Members**, **Telegram Claimed = checked**
+2. Admin **`/sync`** → all Whop members in **Members**; unclaimed show **Telegram Claimed = unchecked**
+3. **`/onboarding`** → pick location (Inside UAE = Vantage PDF, Outside = Premier PDF)
+4. Enter **email → phone → platform user ID** → check **Members** for Phone, Platform, Platform User ID
+5. Complete checklist → T&amp;C → send screenshot → admin **Approve**
+6. **Members** should show **Status = Active**, **Onboarding Completed = checked**, correct **Plan**
 
 Quick bot checks: `/airtable_check`, `/pnl 30`, `/expense 10 USD Ads test`
 

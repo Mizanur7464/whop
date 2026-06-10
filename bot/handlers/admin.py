@@ -31,6 +31,7 @@ from bot.decorators import admin_only, is_admin, log_call
 from config import settings
 from integrations import plan_mapping
 from integrations.whop_api import WhopAPIError, WhopClient
+from integrations.whop_member_profile import profile_from_membership
 
 
 # ---------- /admin ----------
@@ -487,6 +488,7 @@ async def cmd_sync(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
     fetched = 0
     linked = 0
     pending = 0
+    airtable_synced = 0
     try:
         async with WhopClient() as client:
             memberships = await client.iter_memberships(valid=True)
@@ -505,8 +507,21 @@ async def cmd_sync(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
             continue
 
         plan = plan_mapping.resolve_plan_name(product_id)
+        profile = profile_from_membership(m)
         existing_tg = storage.get_telegram_id_for_whop_user(whop_user)
+        tg_username: str | None = None
+        tg_name: str | None = profile.name
         if existing_tg:
+            local = storage.get_user(existing_tg) or {}
+            tg_username = local.get("username") or None
+            tg_name = (
+                " ".join(
+                    p
+                    for p in [local.get("first_name"), local.get("last_name")]
+                    if p
+                ).strip()
+                or profile.name
+            )
             storage.upsert_user(
                 existing_tg,
                 whop_user_id=whop_user,
@@ -518,10 +533,31 @@ async def cmd_sync(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         else:
             pending += 1
 
+        email = profile.email
+        if existing_tg:
+            checkout = (storage.get_user(existing_tg) or {}).get("checkout_email")
+            if checkout:
+                email = checkout.strip().lower()
+
+        await airtable_sync.sync_whop_membership(
+            whop_user_id=str(whop_user),
+            whop_membership_id=m.get("id"),
+            plan=plan,
+            email=email,
+            name=tg_name,
+            phone=profile.phone,
+            join_date=profile.join_date,
+            telegram_user_id=existing_tg,
+            telegram_username=tg_username,
+            telegram_claimed=existing_tg is not None,
+        )
+        airtable_synced += 1
+
     body = (
         "🔄 *Sync complete*\n\n"
         f"• Memberships fetched: *{fetched}*\n"
         f"• Already linked + refreshed: *{linked}*\n"
-        f"• Awaiting `/claim` link: *{pending}*"
+        f"• Awaiting `/claim` link: *{pending}*\n"
+        f"• Airtable rows upserted: *{airtable_synced}*"
     )
     await update.message.reply_text(body, parse_mode=ParseMode.MARKDOWN)
