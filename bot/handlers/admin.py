@@ -6,6 +6,8 @@ All commands gated by @admin_only — non-admins get a polite refusal.
 
 from __future__ import annotations
 
+import html
+
 from loguru import logger
 from telegram import Update
 from telegram.constants import ParseMode
@@ -325,9 +327,9 @@ async def cmd_airtable_setup(update: Update, _: ContextTypes.DEFAULT_TYPE) -> No
         )
         return
 
-    lines = ["*Airtable Schema Setup*", ""]
+    lines = ["<b>Airtable Schema Setup</b>", ""]
     if report.get("deprecated_table"):
-        lines.append(f"✅ `{report['deprecated_table']}`")
+        lines.append(f"✅ <code>{html.escape(str(report['deprecated_table']))}</code>")
         lines.append("")
     for table_name, info in report.get("tables", {}).items():
         errors = info.get("errors") or []
@@ -336,7 +338,7 @@ async def cmd_airtable_setup(update: Update, _: ContextTypes.DEFAULT_TYPE) -> No
         fixed = info.get("fixed") or []
         if info.get("created"):
             icon = "✅"
-            detail = f"created table \\({len(added)} fields\\)"
+            detail = f"created table ({len(added)} fields)"
         elif errors or error:
             icon = "❌"
             detail = error or "; ".join(errors[:3])
@@ -344,18 +346,22 @@ async def cmd_airtable_setup(update: Update, _: ContextTypes.DEFAULT_TYPE) -> No
             icon = "✅"
             parts = []
             if added:
-                parts.append(f"added: `{', '.join(added)}`")
+                parts.append(f"added: {', '.join(added)}")
             if fixed:
-                parts.append(f"fixed: `{', '.join(fixed)}`")
+                parts.append(f"fixed: {', '.join(fixed)}")
             detail = "; ".join(parts)
         else:
             icon = "✅"
             detail = "already up to date"
-        lines.append(f"{icon} *{table_name}* — {detail}")
+        safe_table = html.escape(str(table_name))
+        safe_detail = html.escape(str(detail))
+        lines.append(f"{icon} <b>{safe_table}</b> — {safe_detail}")
 
     overall = "✅ Done" if report.get("ok") else "⚠️ Some fields failed"
-    lines.extend(["", f"*Overall:* {overall}", "", "Run `/airtable_check` to verify."])
-    await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN)
+    lines.extend(
+        ["", f"<b>Overall:</b> {overall}", "", "Run /airtable_check to verify."]
+    )
+    await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
 
 
 # ---------- /reload_config ----------
