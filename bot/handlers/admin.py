@@ -321,10 +321,7 @@ async def cmd_airtable_setup(update: Update, _: ContextTypes.DEFAULT_TYPE) -> No
     )
 
     if report.get("reason"):
-        await update.message.reply_text(
-            f"❌ {report['reason']}",
-            parse_mode=ParseMode.MARKDOWN,
-        )
+        await update.message.reply_text(f"❌ {report['reason']}")
         return
 
     lines = ["<b>Airtable Schema Setup</b>", ""]
@@ -361,7 +358,28 @@ async def cmd_airtable_setup(update: Update, _: ContextTypes.DEFAULT_TYPE) -> No
     lines.extend(
         ["", f"<b>Overall:</b> {overall}", "", "Run /airtable_check to verify."]
     )
-    await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
+    body = "\n".join(lines)
+    try:
+        await update.message.reply_text(body, parse_mode=ParseMode.HTML)
+    except Exception:
+        plain = ["Airtable Schema Setup", ""]
+        if report.get("deprecated_table"):
+            plain.append(str(report["deprecated_table"]))
+        for table_name, info in report.get("tables", {}).items():
+            row = [str(table_name)]
+            if info.get("added"):
+                row.append(f"added: {', '.join(info['added'])}")
+            if info.get("fixed"):
+                row.append(f"fixed: {', '.join(info['fixed'])}")
+            if info.get("errors"):
+                row.append(f"errors: {'; '.join(info['errors'][:3])}")
+            if info.get("error"):
+                row.append(str(info["error"]))
+            if len(row) == 1:
+                row.append("ok")
+            plain.append(" — ".join(row))
+        plain.extend(["", f"Overall: {overall}"])
+        await update.message.reply_text("\n".join(plain))
 
 
 # ---------- /reload_config ----------
