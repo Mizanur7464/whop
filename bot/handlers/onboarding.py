@@ -580,22 +580,20 @@ async def _admin_approve(
     await unlock_for_user(target_user_id)
 
     await update.callback_query.answer("Approved ✅ — user unlocked")
-    try:
-        who = html.escape(admin.username or str(admin.id))
-        await update.callback_query.edit_message_caption(
-            caption=(
-                f"✅ <b>Approved</b> by @{who}\n"
-                f"User ID: <code>{target_user_id}</code>"
-            ),
-            parse_mode=ParseMode.HTML,
-        )
-    except BadRequest:
-        try:
-            await update.callback_query.edit_message_text(
-                f"✅ Approved by @{admin.username or admin.id} — user {target_user_id}",
-            )
-        except BadRequest:
-            pass
+    await _mark_review_message_decided(
+        update,
+        decision="approved",
+        actor=admin,
+        target_user_id=target_user_id,
+        record=local_user,
+    )
+    await _notify_all_admins_review_decision(
+        context,
+        decision="approved",
+        actor=admin,
+        target_user_id=target_user_id,
+        record=local_user,
+    )
 
 
 async def _admin_reject(
@@ -627,17 +625,21 @@ async def _admin_reject(
     )
 
     await update.callback_query.answer("Rejected — user asked to resubmit")
-    try:
-        who = html.escape(admin.username or str(admin.id))
-        await update.callback_query.edit_message_caption(
-            caption=(
-                f"❌ <b>Rejected</b> by @{who}\n"
-                f"User ID: <code>{target_user_id}</code>"
-            ),
-            parse_mode=ParseMode.HTML,
-        )
-    except BadRequest:
-        pass
+    local_user = storage.get_user(target_user_id) or {}
+    await _mark_review_message_decided(
+        update,
+        decision="rejected",
+        actor=admin,
+        target_user_id=target_user_id,
+        record=local_user,
+    )
+    await _notify_all_admins_review_decision(
+        context,
+        decision="rejected",
+        actor=admin,
+        target_user_id=target_user_id,
+        record=local_user,
+    )
 
 
 # ---------- Callback router ----------
@@ -736,8 +738,114 @@ def _review_admin_ids() -> list[int]:
     return settings.onboarding_review_admin_ids
 
 
+def _all_admin_ids() -> list[int]:
+    """Every admin who should receive onboarding decision alerts."""
+    from config import settings
+
+    seen: set[int] = set()
+    ordered: list[int] = []
+    for admin_id in (*settings.telegram_admin_ids, *settings.onboarding_review_admin_ids):
+        if admin_id not in seen:
+            seen.add(admin_id)
+            ordered.append(admin_id)
+    return ordered
+
+
 def _is_review_admin(user_id: int) -> bool:
     return user_id in _review_admin_ids()
+
+
+def _admin_actor_label(actor) -> str:
+    if actor.username:
+        return f"@{html.escape(actor.username)}"
+    return html.escape(str(actor.id))
+
+
+def _review_decision_caption_html(
+    *,
+    decision: str,
+    actor,
+    target_user_id: int,
+    record: dict,
+) -> str:
+    approved = decision == "approved"
+    icon = "✅" if approved else "❌"
+    label = "Approved" if approved else "Rejected"
+    name = html.escape(str(record.get("contact_full_name") or "—"))
+    platform_user_id = html.escape(str(record.get("platform_user_id") or "—"))
+    return (
+        f"{icon} <b>{label}</b> by {_admin_actor_label(actor)}\n\n"
+        f"• User ID: <code>{target_user_id}</code>\n"
+        f"• Name: {name}\n"
+        f"• Platform user ID: {platform_user_id}"
+    )
+
+
+async def _mark_review_message_decided(
+    update: Update,
+    *,
+    decision: str,
+    actor,
+    target_user_id: int,
+    record: dict,
+) -> None:
+    """Update the reviewer's own screenshot message after Approve/Reject."""
+    query = update.callback_query
+    if not query:
+        return
+    caption = _review_decision_caption_html(
+        decision=decision,
+        actor=actor,
+        target_user_id=target_user_id,
+        record=record,
+    )
+    try:
+        await query.edit_message_caption(
+            caption=caption,
+            parse_mode=ParseMode.HTML,
+            reply_markup=None,
+        )
+    except BadRequest:
+        label = "Approved" if decision == "approved" else "Rejected"
+        who = actor.username or str(actor.id)
+        try:
+            await query.edit_message_text(
+                f"{'✅' if decision == 'approved' else '❌'} {label} by @{who}\n"
+                f"User ID: {target_user_id}",
+                reply_markup=None,
+            )
+        except BadRequest:
+            pass
+
+
+async def _notify_all_admins_review_decision(
+    context: ContextTypes.DEFAULT_TYPE,
+    *,
+    decision: str,
+    actor,
+    target_user_id: int,
+    record: dict,
+) -> None:
+    """Tell every admin who approved/rejected which user (except the actor)."""
+    text = _review_decision_caption_html(
+        decision=decision,
+        actor=actor,
+        target_user_id=target_user_id,
+        record=record,
+    )
+    for admin_id in _all_admin_ids():
+        if admin_id == actor.id:
+            continue
+        try:
+            await context.bot.send_message(
+                chat_id=admin_id,
+                text=text,
+                parse_mode=ParseMode.HTML,
+            )
+        except Exception as e:
+            logger.warning(
+                f"Could not notify admin {admin_id} of onboarding {decision}: {e}"
+            )
 
 
 def _telegram_username_line(user) -> str:

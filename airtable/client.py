@@ -319,19 +319,17 @@ class AirtableClient:
         platform: str | None = None,
         platform_user_id: str | None = None,
         name: str | None = None,
+        telegram_username: str | None = None,
     ) -> Optional[dict]:
         if not self.enabled:
             return None
-        table = self._table(settings.airtable_members_table)
-        match_formula = match({MembersField.TELEGRAM_USER_ID: str(telegram_user_id)})
-        existing = await self._run(table.first, formula=match_formula)
-        if not existing:
-            return None
+
+        completed_at = datetime.now(timezone.utc).isoformat()
         fields: dict[str, Any] = {
             MembersField.ONBOARDING_COMPLETED: True,
-            MembersField.ONBOARDING_COMPLETED_AT: datetime.now(timezone.utc).isoformat(),
+            MembersField.ONBOARDING_COMPLETED_AT: completed_at,
             MembersField.STATUS: MemberStatus.ACTIVE.value,
-            MembersField.LAST_ACTIVITY: datetime.now(timezone.utc).isoformat(),
+            MembersField.LAST_ACTIVITY: completed_at,
         }
         plan_value = self._plan_field(plan)
         if plan_value:
@@ -345,7 +343,20 @@ class AirtableClient:
             fields[MembersField.PLATFORM] = platform_value
         if platform_user_id:
             fields[MembersField.PLATFORM_USER_ID] = platform_user_id.strip()
-        return await self._run(table.update, existing["id"], fields)
+
+        table = self._table(settings.airtable_members_table)
+        match_formula = match({MembersField.TELEGRAM_USER_ID: str(telegram_user_id)})
+        existing = await self._run(table.first, formula=match_formula)
+        if existing:
+            return await self._run(table.update, existing["id"], fields)
+
+        create_fields = {
+            MembersField.TELEGRAM_USER_ID: str(telegram_user_id),
+            **fields,
+        }
+        if telegram_username:
+            create_fields[MembersField.TELEGRAM_USERNAME] = telegram_username
+        return await self._run(table.create, create_fields)
 
     async def find_member_record_id(self, telegram_user_id: int) -> Optional[str]:
         if not self.enabled:
