@@ -93,6 +93,8 @@ def resolve_plan_name(
         label = product_label.strip()
         if label:
             return label
+    if settings.whop_free_access:
+        return "free"
     return "unknown"
 
 
@@ -103,6 +105,8 @@ def plan_for_airtable(plan: str | None) -> str | None:
     normalized = plan.strip().lower()
     if normalized == "unknown":
         return "unknown"
+    if normalized == "free":
+        return "Basic"
     if normalized in {"basic", "premium", "vip"}:
         return normalized.title()
     return plan.strip()[:80]

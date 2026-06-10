@@ -160,6 +160,13 @@ async def _send_location_doc(
 
     user = update.effective_user
     storage.upsert_user(user.id, location=loc.id, platform=loc.platform)
+    name = " ".join(p for p in [user.first_name, user.last_name] if p) or None
+    await airtable_sync.member_platform_selected(
+        telegram_user_id=user.id,
+        telegram_username=user.username,
+        name=name,
+        platform=loc.platform,
+    )
 
     if loc.doc.type == "url" and loc.doc.url:
         await send_text(

@@ -104,7 +104,7 @@ class Settings(BaseSettings):
     airtable_api_key: str = Field(default="", alias="AIRTABLE_API_KEY")
     airtable_base_id: str = Field(default="", alias="AIRTABLE_BASE_ID")
     airtable_members_table: str = Field(default="Members", alias="AIRTABLE_MEMBERS_TABLE")
-    airtable_finance_table: str = Field(default="Finance", alias="AIRTABLE_FINANCE_TABLE")
+    airtable_finance_table: str = Field(default="Payments", alias="AIRTABLE_FINANCE_TABLE")
     airtable_payments_table: str = Field(default="Payments", alias="AIRTABLE_PAYMENTS_TABLE")
     airtable_expenses_table: str = Field(default="Expenses", alias="AIRTABLE_EXPENSES_TABLE")
     airtable_checklist_table: str = Field(default="Checklist", alias="AIRTABLE_CHECKLIST_TABLE")

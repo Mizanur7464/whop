@@ -200,6 +200,28 @@ async def copytrading_completed(
         logger.warning(f"Airtable copytrading_completed failed: {e}")
 
 
+async def member_platform_selected(
+    *,
+    telegram_user_id: int,
+    telegram_username: str | None,
+    name: str | None,
+    platform: str,
+) -> None:
+    c = client()
+    if not c.enabled:
+        return
+    try:
+        await c.upsert_member(
+            telegram_user_id=telegram_user_id,
+            telegram_username=telegram_username,
+            name=name,
+            platform=platform,
+        )
+        logger.info(f"Airtable: platform={platform!r} tg={telegram_user_id}")
+    except Exception as e:
+        logger.warning(f"Airtable member_platform_selected failed: {e}")
+
+
 async def member_contact_collected(
     *,
     telegram_user_id: int,

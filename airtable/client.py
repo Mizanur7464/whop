@@ -213,9 +213,21 @@ class AirtableClient:
         match_formula = match({MembersField.TELEGRAM_USER_ID: str(telegram_user_id)})
 
         existing = await self._run(table.first, formula=match_formula)
+        optional_keys = {
+            MembersField.PHONE,
+            MembersField.PLATFORM,
+            MembersField.PLATFORM_USER_ID,
+        }
         if existing:
-            return await self._run(table.update, existing["id"], fields)
-        return await self._run(table.create, fields)
+            result = await self._run(table.update, existing["id"], fields)
+        else:
+            result = await self._run(table.create, fields)
+        if result is None and any(k in fields for k in optional_keys):
+            slim = {k: v for k, v in fields.items() if k not in optional_keys}
+            if existing:
+                return await self._run(table.update, existing["id"], slim)
+            return await self._run(table.create, slim)
+        return result
 
     @staticmethod
     def _plan_field(plan: str | None) -> str | None:
@@ -420,8 +432,28 @@ class AirtableClient:
             table.first, formula=match({entry_id_field: entry_id})
         )
         if existing:
-            return await self._run(table.update, existing["id"], fields)
-        return await self._run(table.create, fields)
+            result = await self._run(table.update, existing["id"], fields)
+        else:
+            result = await self._run(table.create, fields)
+        if result is None:
+            legacy = {
+                entry_id_field: entry_id,
+                FinanceField.AMOUNT: fields[FinanceField.AMOUNT],
+                FinanceField.CURRENCY: fields[FinanceField.CURRENCY],
+                FinanceField.DATE: fields[FinanceField.DATE],
+            }
+            if FinanceField.PLAN in fields:
+                legacy[FinanceField.PLAN] = fields[FinanceField.PLAN]
+            if FinanceField.WHOP_USER_ID in fields:
+                legacy[FinanceField.WHOP_USER_ID] = fields[FinanceField.WHOP_USER_ID]
+            if FinanceField.STATUS in fields:
+                legacy[FinanceField.STATUS] = fields[FinanceField.STATUS]
+            if FinanceField.MEMBER in fields:
+                legacy[FinanceField.MEMBER] = fields[FinanceField.MEMBER]
+            if existing:
+                return await self._run(table.update, existing["id"], legacy)
+            return await self._run(table.create, legacy)
+        return result
 
     async def record_payment(
         self,
