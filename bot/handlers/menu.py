@@ -24,6 +24,7 @@ from bot.access import idle_after_complete_message, shows_main_menu
 from bot.decorators import is_admin
 from bot.admin_panel import show_admin_panel
 from bot.handlers import onboarding as onboarding_handlers
+from bot.onboarding_alerts import set_onboarding_step
 from bot.telegram_utils import safe_answer_callback
 
 
@@ -212,6 +213,8 @@ async def _handle_checklist(update: Update, context, args: list[str]) -> None:
         return
     user = update.effective_user
     item_id = args[1]
+    if onboarding_handlers.needs_onboarding(user.id):
+        set_onboarding_step(context, user.id, "checklist")
     new_state = storage.toggle_checklist_item(user.id, item_id)
     await update.callback_query.answer(
         "Marked complete ✅" if new_state else "Unmarked", show_alert=False

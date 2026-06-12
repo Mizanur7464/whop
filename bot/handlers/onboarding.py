@@ -24,6 +24,11 @@ from telegram.ext import ContextTypes
 from airtable import sync as airtable_sync
 from bot.community_unlock import unlock_for_user
 from bot import jobs, keyboards, onboarding_config, storage
+from bot.onboarding_alerts import (
+    STEP_LABELS,
+    notify_admins_onboarding_issue,
+    set_onboarding_step,
+)
 from bot.decorators import log_call
 from bot.channel_context import block_if_group_chat, ensure_welcome_context
 from bot.community_layout import FLOW_WELCOME
@@ -129,10 +134,11 @@ async def _send_new_message(
 
 # ---------- Screens ----------
 
-async def show_welcome(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
+async def show_welcome(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Step 1: Nice welcome message only."""
     cfg = onboarding_config.get()
     user = update.effective_user
+    set_onboarding_step(context, user.id, "welcome")
     storage.mark_onboarding_started(user.id)
 
     text = _msg(cfg.welcome_message)
@@ -147,6 +153,9 @@ async def show_location(
 ) -> None:
     """Step 2: Location selection (doc: Inside UAE / outside UAE)."""
     cfg = onboarding_config.get()
+    user = update.effective_user
+    if user:
+        set_onboarding_step(context, user.id, "location")
     text = _msg(cfg.location_message)
     rows = [
         [InlineKeyboardButton(loc.label, callback_data=f"onb:loc:{loc.id}")]
@@ -175,6 +184,7 @@ async def _send_location_doc(
         return
 
     user = update.effective_user
+    set_onboarding_step(context, user.id, "location_pdf")
     storage.upsert_user(user.id, location=loc.id, platform=loc.platform)
     name = " ".join(p for p in [user.first_name, user.last_name] if p) or None
     await airtable_sync.member_platform_selected(
@@ -186,32 +196,54 @@ async def _send_location_doc(
 
     caption = loc.doc.caption or f"{loc.platform} onboarding instructions"
     pdf_path = Path(loc.doc.path) if loc.doc.path else None
+    pdf_ok = False
 
     if pdf_path and pdf_path.is_file():
         try:
             with pdf_path.open("rb") as f:
-                sent = await send_document(
+                pdf_ok = await send_document(
                     update,
                     context,
                     f,
                     caption=caption,
                     flow=FLOW_WELCOME,
                 )
-            if sent:
+            if pdf_ok:
                 return
             logger.warning(
-                f"onboarding: PDF send returned false path={pdf_path} user={user.id}"
+                f"onboarding: PDF send returned false path={pdf_path} "
+                f"user={user.id}"
             )
         except Exception as e:
             logger.warning(
                 f"onboarding: PDF send failed path={pdf_path} user={user.id}: {e}"
             )
+            await notify_admins_onboarding_issue(
+                context,
+                user=user,
+                step="location_pdf",
+                detail=f"Could not send PDF ({pdf_path.name})",
+                error=e,
+            )
     else:
-        logger.error(
-            f"onboarding: PDF missing on server path={loc.doc.path!r} user={user.id}"
+        detail = f"PDF missing on server: {loc.doc.path!r}"
+        logger.error(f"onboarding: {detail} user={user.id}")
+        await notify_admins_onboarding_issue(
+            context,
+            user=user,
+            step="location_pdf",
+            detail=detail,
         )
 
-    await send_text(
+    if not pdf_ok:
+        if pdf_path and pdf_path.is_file():
+            await notify_admins_onboarding_issue(
+                context,
+                user=user,
+                step="location_pdf",
+                detail=f"Could not deliver PDF file ({pdf_path.name}) to Telegram",
+            )
+        await send_text(
         update,
         context,
         "We couldn't send the onboarding PDF right now. "
@@ -230,6 +262,7 @@ async def show_checklist(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     """Step 5: Checklist after PDF."""
     cfg = onboarding_config.get()
     user = update.effective_user
+    set_onboarding_step(context, user.id, "checklist")
     done_map = storage.get_checklist(user.id)
 
     items_render = [
@@ -259,8 +292,9 @@ async def show_checklist(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await _send_or_edit(update, text, markup)
 
 
-async def show_continue(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
+async def show_continue(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
+    set_onboarding_step(context, user.id, "continue")
     if not _all_checklist_done(user.id):
         await update.callback_query.answer(
             "Please complete all checklist steps first.", show_alert=True
@@ -284,6 +318,7 @@ async def show_continue(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
 async def show_terms(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Step before screenshot: T&C PDF + Accept."""
     user = update.effective_user
+    set_onboarding_step(context, user.id, "terms")
     if not _all_checklist_done(user.id):
         await update.callback_query.answer(
             "Please complete all checklist steps first.", show_alert=True
@@ -303,6 +338,12 @@ async def show_terms(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                     flow=FLOW_WELCOME,
                 )
         except FileNotFoundError:
+            await notify_admins_onboarding_issue(
+                context,
+                user=user,
+                step="terms",
+                detail=f"Terms PDF missing: {doc.path!r}",
+            )
             await send_text(
                 update,
                 context,
@@ -333,6 +374,7 @@ async def show_terms(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 async def accept_terms(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """User accepted T&C — log, notify admins, then ask for screenshot."""
     user = update.effective_user
+    set_onboarding_step(context, user.id, "terms_accept")
     if not _all_checklist_done(user.id):
         await update.callback_query.answer(
             "Please complete all checklist steps first.", show_alert=True
@@ -366,6 +408,7 @@ async def show_contact_intro(
 ) -> None:
     """Collect email, phone, and confirm Telegram ID before T&C."""
     user = update.effective_user
+    set_onboarding_step(context, user.id, "contact")
     record = storage.get_user(user.id) or {}
     if (
         _contact_names_complete(record)
@@ -419,6 +462,8 @@ async def on_onboarding_contact_text(
 
     cfg = onboarding_config.get()
     step = context.user_data.get(CONTACT_STEP_KEY)
+    if step:
+        set_onboarding_step(context, user.id, f"contact_{step}")
 
     if step == "first_name":
         if len(text) < 2:
@@ -546,6 +591,8 @@ async def on_screenshot_photo(
     user = update.effective_user
     if not user or not update.message or not update.message.photo:
         return
+
+    set_onboarding_step(context, user.id, "screenshot")
 
     if storage.is_fully_activated(user.id):
         cfg = onboarding_config.get()
@@ -703,32 +750,46 @@ async def on_onboarding_callback(
     await safe_answer_callback(query)
     data = query.data or "" if query else ""
     action = _onb_action(data)
+    user = update.effective_user
     logger.info(f"onboarding callback: {data!r} -> action={action!r}")
 
+    if not user:
+        return
+
+    try:
+        await _dispatch_onboarding_action(update, context, action=action)
+    except Exception as e:
+        logger.exception(f"onboarding callback failed action={action!r}: {e}")
+        step = action.split(":", 1)[0] if action else "callback"
+        if action.startswith("loc:"):
+            step = "location_pdf"
+        await notify_admins_onboarding_issue(
+            context,
+            user=user,
+            step=step if step in STEP_LABELS else "callback",
+            detail=f"Action {data!r} failed",
+            error=e,
+        )
+        await safe_send_message(
+            context.bot,
+            user.id,
+            "Something went wrong. Please send /onboarding to try again.",
+            parse_mode=None,
+        )
+
+
+async def _dispatch_onboarding_action(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, *, action: str
+) -> None:
     if action in ("welcome", "start"):
         await show_welcome(update, context)
     elif action == "continue_intro":
-        # Legacy button from older messages — go straight to location.
         await show_location(update, context)
     elif action in ("show_location", "location"):
         await show_location(update, context)
     elif action.startswith("loc:"):
         location_id = action.split(":", 1)[1]
-        try:
-            await _send_location_doc(update, context, location_id)
-        except Exception as e:
-            logger.exception(
-                f"onboarding location step failed loc={location_id!r}: {e}"
-            )
-            user = update.effective_user
-            if user:
-                await safe_send_message(
-                    context.bot,
-                    user.id,
-                    "Something went wrong loading the document. "
-                    "Please send /onboarding to try again.",
-                    parse_mode=None,
-                )
+        await _send_location_doc(update, context, location_id)
         await show_checklist(update, context)
     elif action == "checklist":
         await show_checklist(update, context)
@@ -755,7 +816,7 @@ async def on_onboarding_callback(
             return
         await _admin_reject(update, context, target_id)
     else:
-        logger.warning(f"Unknown onboarding action: {data}")
+        logger.warning(f"Unknown onboarding action: {update.callback_query.data if update.callback_query else action}")
 
 
 @log_call

@@ -17,6 +17,7 @@ from telegram.constants import ParseMode
 from telegram.ext import ContextTypes
 
 from bot import texts
+from bot.onboarding_alerts import current_onboarding_step
 from bot.telegram_utils import is_stale_callback_error
 from config import settings
 
@@ -39,9 +40,16 @@ async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
         except Exception:
             update_str = repr(update)[:1000]
 
+    step_line = ""
+    if isinstance(update, Update) and update.effective_user:
+        step = current_onboarding_step(context, update.effective_user.id)
+        if step:
+            step_line = f"\n• Onboarding step: `{step}`"
+
     admin_alert = (
         "🚨 *Bot Error*\n\n"
-        f"`{html.escape(str(err))[:300]}`\n\n"
+        f"`{html.escape(str(err))[:300]}`"
+        f"{step_line}\n\n"
         "*Trace (tail):*\n"
         f"```\n{html.escape(tb_text)}\n```"
     )
