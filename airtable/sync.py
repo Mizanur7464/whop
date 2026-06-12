@@ -32,6 +32,18 @@ def client() -> AirtableClient:
     return _client
 
 
+def _linked_whop(telegram_user_id: int) -> dict:
+    """Whop IDs from local storage so Airtable upserts match the same row."""
+    from bot import storage
+
+    user = storage.get_user(telegram_user_id) or {}
+    return {
+        "whop_user_id": user.get("whop_user_id"),
+        "whop_membership_id": user.get("whop_membership_id"),
+        "plan": user.get("plan"),
+    }
+
+
 # ---------- Member lifecycle ----------
 
 async def member_joined(
@@ -151,7 +163,11 @@ async def member_status_changed(telegram_user_id: int, status: str) -> None:
     canonical = mapping.get(status.lower(), MemberStatus.PENDING)
 
     try:
-        await c.update_member_status(telegram_user_id, canonical)
+        await c.update_member_status(
+            telegram_user_id,
+            canonical,
+            whop_user_id=_linked_whop(telegram_user_id).get("whop_user_id"),
+        )
         logger.info(f"Airtable: status tg={telegram_user_id} -> {canonical.value}")
     except Exception as e:
         logger.warning(f"Airtable member_status_changed failed: {e}")
@@ -168,11 +184,13 @@ async def terms_accepted(
     if not c.enabled:
         return
     try:
+        linked = _linked_whop(telegram_user_id)
         await c.record_terms_accepted(
             telegram_user_id,
             telegram_username=telegram_username,
             name=name,
             accepted_at_iso=accepted_at_iso,
+            whop_user_id=linked.get("whop_user_id"),
         )
         logger.info(f"Airtable: terms accepted tg={telegram_user_id}")
     except Exception as e:
@@ -192,13 +210,15 @@ async def onboarding_completed(
     if not c.enabled:
         return
     try:
+        linked = _linked_whop(telegram_user_id)
         await c.mark_onboarding_complete(
             telegram_user_id,
-            plan=plan,
+            plan=plan or linked.get("plan"),
             phone=phone,
             platform=platform,
             platform_user_id=platform_user_id,
             name=name,
+            whop_user_id=linked.get("whop_user_id"),
         )
         logger.info(f"Airtable: onboarding done tg={telegram_user_id}")
     except Exception as e:
@@ -257,11 +277,13 @@ async def copytrading_completed(
     plat = f" ({platform})" if platform else ""
     note = f"Copy trading setup completed{plat} at {when}"
     try:
+        linked = _linked_whop(telegram_user_id)
         await c.append_member_note(
             telegram_user_id,
             note,
             telegram_username=telegram_username,
             name=name,
+            whop_user_id=linked.get("whop_user_id"),
         )
         logger.info(f"Airtable: copy trading done tg={telegram_user_id}")
     except Exception as e:
@@ -279,11 +301,15 @@ async def member_platform_selected(
     if not c.enabled:
         return
     try:
+        linked = _linked_whop(telegram_user_id)
         await c.upsert_member(
             telegram_user_id=telegram_user_id,
             telegram_username=telegram_username,
             name=name,
             platform=platform,
+            whop_user_id=linked.get("whop_user_id"),
+            whop_membership_id=linked.get("whop_membership_id"),
+            plan=linked.get("plan"),
         )
         logger.info(f"Airtable: platform={platform!r} tg={telegram_user_id}")
     except Exception as e:
@@ -304,6 +330,7 @@ async def member_contact_collected(
     if not c.enabled:
         return
     try:
+        linked = _linked_whop(telegram_user_id)
         await c.upsert_member(
             telegram_user_id=telegram_user_id,
             telegram_username=telegram_username,
@@ -312,6 +339,9 @@ async def member_contact_collected(
             phone=phone,
             platform=platform,
             platform_user_id=platform_user_id,
+            whop_user_id=linked.get("whop_user_id"),
+            whop_membership_id=linked.get("whop_membership_id"),
+            plan=linked.get("plan"),
         )
         logger.info(
             f"Airtable: contact saved tg={telegram_user_id} "
@@ -336,11 +366,13 @@ async def member_left_group(
     where = group_name or "group"
     note = f"Left {where} at {left_at_iso}: {reason}"
     try:
+        linked = _linked_whop(telegram_user_id)
         await c.append_member_note(
             telegram_user_id,
             note,
             telegram_username=telegram_username,
             name=name,
+            whop_user_id=linked.get("whop_user_id"),
         )
         logger.info(f"Airtable: left group tg={telegram_user_id} reason={reason!r}")
     except Exception as e:
@@ -360,11 +392,13 @@ async def support_submitted(
     when = datetime.now(timezone.utc).isoformat()
     note = f"Support form submitted at {when}\n{summary}"
     try:
+        linked = _linked_whop(telegram_user_id)
         await c.append_member_note(
             telegram_user_id,
             note,
             telegram_username=telegram_username,
             name=name,
+            whop_user_id=linked.get("whop_user_id"),
         )
         logger.info(f"Airtable: support submitted tg={telegram_user_id}")
     except Exception as e:

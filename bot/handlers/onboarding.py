@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import html
 from datetime import datetime, timezone
+from pathlib import Path
 
 from loguru import logger
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -167,10 +168,10 @@ async def show_location(
 async def _send_location_doc(
     update: Update, context: ContextTypes.DEFAULT_TYPE, location_id: str
 ) -> None:
-    """Step 4: Send PDF only after location is chosen."""
+    """Step 4: Send the onboarding PDF from data/docs/ (buyer files, not external links)."""
     loc = location_by_id(location_id)
     if not loc:
-        await update.callback_query.answer("Invalid selection.", show_alert=True)
+        logger.warning(f"onboarding: unknown location id {location_id!r}")
         return
 
     user = update.effective_user
@@ -183,33 +184,40 @@ async def _send_location_doc(
         platform=loc.platform,
     )
 
-    if loc.doc.type == "url" and loc.doc.url:
-        await send_text(
-            update,
-            context,
-            f"{loc.doc.caption}\n\n{loc.doc.url}",
-            flow=FLOW_WELCOME,
-            disable_preview=False,
-        )
-    elif loc.doc.type == "file" and loc.doc.path:
+    caption = loc.doc.caption or f"{loc.platform} onboarding instructions"
+    pdf_path = Path(loc.doc.path) if loc.doc.path else None
+
+    if pdf_path and pdf_path.is_file():
         try:
-            with open(loc.doc.path, "rb") as f:
-                await send_document(
+            with pdf_path.open("rb") as f:
+                sent = await send_document(
                     update,
                     context,
                     f,
-                    caption=loc.doc.caption or f"{loc.platform} onboarding instructions",
+                    caption=caption,
                     flow=FLOW_WELCOME,
                 )
-        except FileNotFoundError:
-            await send_text(
-                update,
-                context,
-                "Onboarding document is not uploaded yet. The team will add it shortly.",
-                flow=FLOW_WELCOME,
+            if sent:
+                return
+            logger.warning(
+                f"onboarding: PDF send returned false path={pdf_path} user={user.id}"
             )
+        except Exception as e:
+            logger.warning(
+                f"onboarding: PDF send failed path={pdf_path} user={user.id}: {e}"
+            )
+    else:
+        logger.error(
+            f"onboarding: PDF missing on server path={loc.doc.path!r} user={user.id}"
+        )
 
-    await update.callback_query.answer("Document sent ✅")
+    await send_text(
+        update,
+        context,
+        "We couldn't send the onboarding PDF right now. "
+        "Please try /onboarding again in a moment, or contact support.",
+        flow=FLOW_WELCOME,
+    )
 
 
 def _all_checklist_done(user_id: int) -> bool:
@@ -706,7 +714,21 @@ async def on_onboarding_callback(
         await show_location(update, context)
     elif action.startswith("loc:"):
         location_id = action.split(":", 1)[1]
-        await _send_location_doc(update, context, location_id)
+        try:
+            await _send_location_doc(update, context, location_id)
+        except Exception as e:
+            logger.exception(
+                f"onboarding location step failed loc={location_id!r}: {e}"
+            )
+            user = update.effective_user
+            if user:
+                await safe_send_message(
+                    context.bot,
+                    user.id,
+                    "Something went wrong loading the document. "
+                    "Please send /onboarding to try again.",
+                    parse_mode=None,
+                )
         await show_checklist(update, context)
     elif action == "checklist":
         await show_checklist(update, context)

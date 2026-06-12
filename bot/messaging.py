@@ -64,12 +64,32 @@ async def send_document(
     *,
     caption: str | None = None,
     flow: str | None = None,
-) -> None:
+) -> bool:
+    """Send a document; return True on success (False so callers can fall back to URL)."""
     if not update.effective_chat:
-        return
-    await context.bot.send_document(
-        chat_id=chat_id(update),
-        document=document,
-        caption=caption,
-        **message_thread_kwargs(update, flow),
-    )
+        return False
+    thread_kwargs = message_thread_kwargs(update, flow)
+    cid = chat_id(update)
+
+    async def _attempt(extra: dict | None = None) -> None:
+        await context.bot.send_document(
+            chat_id=cid,
+            document=document,
+            caption=caption,
+            **(extra if extra is not None else thread_kwargs),
+        )
+
+    try:
+        await _attempt()
+        return True
+    except BadRequest as e:
+        err = str(e).lower()
+        if thread_kwargs and "thread not found" in err:
+            try:
+                await _attempt(extra={})
+                return True
+            except BadRequest:
+                return False
+        return False
+    except Exception:
+        return False
