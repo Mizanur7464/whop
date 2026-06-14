@@ -211,6 +211,9 @@ async def onboarding_completed(
         return
     try:
         linked = _linked_whop(telegram_user_id)
+        from bot import storage
+
+        user = storage.get_user(telegram_user_id) or {}
         await c.mark_onboarding_complete(
             telegram_user_id,
             plan=plan or linked.get("plan"),
@@ -218,11 +221,24 @@ async def onboarding_completed(
             platform=platform,
             platform_user_id=platform_user_id,
             name=name,
+            telegram_username=user.get("username"),
             whop_user_id=linked.get("whop_user_id"),
         )
         logger.info(f"Airtable: onboarding done tg={telegram_user_id}")
     except Exception as e:
         logger.warning(f"Airtable onboarding_completed failed: {e}")
+
+
+async def reconcile_members_table() -> dict[str, int]:
+    """Merge/delete duplicate rows in the Members table."""
+    c = client()
+    if not c.enabled:
+        return {"groups_merged": 0, "rows_before": 0, "rows_after": 0}
+    try:
+        return await c.reconcile_duplicate_members()
+    except Exception as e:
+        logger.warning(f"Airtable reconcile_members_table failed: {e}")
+        return {"groups_merged": 0, "rows_before": 0, "rows_after": 0}
 
 
 # ---------- Checklist activity ----------

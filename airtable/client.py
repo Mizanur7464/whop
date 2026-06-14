@@ -23,8 +23,9 @@ from __future__ import annotations
 
 import asyncio
 import random
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any, AsyncIterator, Optional
 
 from loguru import logger
 
@@ -51,6 +52,28 @@ from airtable.schema import (
     TRADING_PLATFORMS,
 )
 from config import settings
+
+_MEMBER_UPSERT_LOCKS: dict[str, asyncio.Lock] = {}
+_MEMBER_UPSERT_GUARD = asyncio.Lock()
+
+
+@asynccontextmanager
+async def member_upsert_lock(
+    *,
+    telegram_user_id: int | None = None,
+    whop_user_id: str | None = None,
+) -> AsyncIterator[None]:
+    """Serialize Airtable member upserts for the same person (prevents duplicate rows)."""
+    parts: list[str] = []
+    if telegram_user_id is not None:
+        parts.append(f"tg:{telegram_user_id}")
+    if whop_user_id:
+        parts.append(f"whop:{whop_user_id}")
+    key = "|".join(parts) if parts else "member:unknown"
+    async with _MEMBER_UPSERT_GUARD:
+        lock = _MEMBER_UPSERT_LOCKS.setdefault(key, asyncio.Lock())
+    async with lock:
+        yield
 
 
 def normalize_currency(raw: str | None) -> str:
@@ -171,32 +194,244 @@ class AirtableClient:
     def _placeholder_telegram_id(cls, whop_user_id: str) -> str:
         return f"{cls.PLACEHOLDER_TG_PREFIX}{whop_user_id}"
 
-    async def find_member_by_whop_user_id(self, whop_user_id: str) -> Optional[dict]:
+    @staticmethod
+    def _member_row_score(rec: dict) -> int:
+        """Prefer the most complete row when merging duplicates."""
+        fields = rec.get("fields") or {}
+        score = 0
+        tg = fields.get(MembersField.TELEGRAM_USER_ID)
+        if tg and not AirtableClient._is_placeholder_telegram_id(str(tg)):
+            score += 100
+        elif tg:
+            score += 20
+        if fields.get(MembersField.WHOP_USER_ID):
+            score += 50
+        if fields.get(MembersField.EMAIL):
+            score += 15
+        if fields.get(MembersField.PHONE):
+            score += 10
+        if fields.get(MembersField.PLATFORM_USER_ID):
+            score += 10
+        if fields.get(MembersField.ONBOARDING_COMPLETED):
+            score += 25
+        if fields.get(MembersField.TELEGRAM_CLAIMED):
+            score += 10
+        for key in (
+            MembersField.NAME,
+            MembersField.PLAN,
+            MembersField.PLATFORM,
+            MembersField.JOIN_DATE,
+        ):
+            if fields.get(key):
+                score += 2
+        return score
+
+    def _merge_member_field_sets(
+        self,
+        field_sets: list[dict[str, Any]],
+        *,
+        telegram_user_id: int | None = None,
+        whop_user_id: str | None = None,
+    ) -> dict[str, Any]:
+        merged: dict[str, Any] = {}
+        notes: list[str] = []
+
+        for fields in field_sets:
+            for key, val in fields.items():
+                if val is None or val == "":
+                    continue
+                if key == MembersField.NOTES:
+                    notes.append(str(val).strip())
+                    continue
+                if key == MembersField.ONBOARDING_COMPLETED:
+                    merged[key] = bool(merged.get(key)) or bool(val)
+                    continue
+                if key == MembersField.TELEGRAM_CLAIMED:
+                    merged[key] = bool(merged.get(key)) or bool(val)
+                    continue
+                if key == MembersField.TELEGRAM_USER_ID:
+                    if val and not self._is_placeholder_telegram_id(str(val)):
+                        merged[key] = str(val)
+                    elif key not in merged:
+                        merged[key] = val
+                    continue
+                if key not in merged or merged[key] in ("", None):
+                    merged[key] = val
+
+        if notes:
+            merged[MembersField.NOTES] = "\n".join(dict.fromkeys(notes))
+
+        if telegram_user_id:
+            merged[MembersField.TELEGRAM_USER_ID] = str(telegram_user_id)
+        elif whop_user_id and (
+            MembersField.TELEGRAM_USER_ID not in merged
+            or not merged.get(MembersField.TELEGRAM_USER_ID)
+            or self._is_placeholder_telegram_id(
+                str(merged.get(MembersField.TELEGRAM_USER_ID))
+            )
+        ):
+            merged[MembersField.TELEGRAM_USER_ID] = self._placeholder_telegram_id(
+                whop_user_id
+            )
+
+        if whop_user_id:
+            merged[MembersField.WHOP_USER_ID] = whop_user_id
+
+        return merged
+
+    async def _collect_member_rows(
+        self,
+        *,
+        telegram_user_id: int | None = None,
+        whop_user_id: str | None = None,
+        platform_user_id: str | None = None,
+    ) -> list[dict]:
+        table = self._table(settings.airtable_members_table)
+        seen: dict[str, dict] = {}
+
+        if telegram_user_id is not None:
+            formula = match({MembersField.TELEGRAM_USER_ID: str(telegram_user_id)})
+            for rec in await self._run(table.all, formula=formula) or []:
+                seen[rec["id"]] = rec
+
+        if whop_user_id:
+            for formula in (
+                match({MembersField.WHOP_USER_ID: whop_user_id}),
+                match(
+                    {
+                        MembersField.TELEGRAM_USER_ID: self._placeholder_telegram_id(
+                            whop_user_id
+                        )
+                    }
+                ),
+            ):
+                for rec in await self._run(table.all, formula=formula) or []:
+                    seen[rec["id"]] = rec
+
+        pid = (platform_user_id or "").strip()
+        if pid:
+            formula = match({MembersField.PLATFORM_USER_ID: pid})
+            for rec in await self._run(table.all, formula=formula) or []:
+                seen[rec["id"]] = rec
+
+        return list(seen.values())
+
+    async def consolidate_member_rows(
+        self,
+        *,
+        telegram_user_id: int | None = None,
+        whop_user_id: str | None = None,
+        platform_user_id: str | None = None,
+    ) -> Optional[dict]:
+        """Merge duplicate member rows and delete extras."""
         if not self.enabled:
             return None
+
+        records = await self._collect_member_rows(
+            telegram_user_id=telegram_user_id,
+            whop_user_id=whop_user_id,
+            platform_user_id=platform_user_id,
+        )
+        if not records:
+            return None
+        if len(records) == 1:
+            return records[0]
+
         table = self._table(settings.airtable_members_table)
-        match_formula = match({MembersField.WHOP_USER_ID: whop_user_id})
-        return await self._run(table.first, formula=match_formula)
+        canonical = max(records, key=self._member_row_score)
+        merged_fields = self._merge_member_field_sets(
+            [rec.get("fields") or {} for rec in records],
+            telegram_user_id=telegram_user_id,
+            whop_user_id=whop_user_id,
+        )
+        result = await self._run(table.update, canonical["id"], merged_fields)
+
+        for rec in records:
+            if rec["id"] == canonical["id"]:
+                continue
+            deleted = await self._run(table.delete, rec["id"])
+            if deleted is not None:
+                logger.info(
+                    f"Airtable: deleted duplicate member row {rec['id']} "
+                    f"(kept {canonical['id']})"
+                )
+
+        return result or {**canonical, "fields": merged_fields}
+
+    async def reconcile_duplicate_members(self) -> dict[str, int]:
+        """Scan the Members table and merge/delete duplicate rows."""
+        if not self.enabled:
+            return {"groups_merged": 0, "rows_before": 0, "rows_after": 0}
+
+        table = self._table(settings.airtable_members_table)
+        records = await self._run(table.all) or []
+        rows_before = len(records)
+
+        telegram_ids: set[int] = set()
+        whop_ids: set[str] = set()
+        platform_ids: set[str] = set()
+
+        for rec in records:
+            fields = rec.get("fields") or {}
+            tg_raw = fields.get(MembersField.TELEGRAM_USER_ID)
+            if tg_raw and not self._is_placeholder_telegram_id(str(tg_raw)):
+                try:
+                    telegram_ids.add(int(str(tg_raw).strip()))
+                except ValueError:
+                    pass
+            whop = fields.get(MembersField.WHOP_USER_ID)
+            if whop:
+                whop_ids.add(str(whop).strip())
+            pid = fields.get(MembersField.PLATFORM_USER_ID)
+            if pid:
+                platform_ids.add(str(pid).strip())
+
+        groups_merged = 0
+        for tg in telegram_ids:
+            rows = await self._collect_member_rows(telegram_user_id=tg)
+            if len(rows) > 1:
+                await self.consolidate_member_rows(telegram_user_id=tg)
+                groups_merged += 1
+
+        for whop in whop_ids:
+            rows = await self._collect_member_rows(whop_user_id=whop)
+            if len(rows) > 1:
+                await self.consolidate_member_rows(whop_user_id=whop)
+                groups_merged += 1
+
+        for pid in platform_ids:
+            rows = await self._collect_member_rows(platform_user_id=pid)
+            if len(rows) > 1:
+                await self.consolidate_member_rows(platform_user_id=pid)
+                groups_merged += 1
+
+        rows_after = len(await self._run(table.all) or [])
+        logger.info(
+            f"Airtable reconcile: merged {groups_merged} groups, "
+            f"{rows_before} -> {rows_after} rows"
+        )
+        return {
+            "groups_merged": groups_merged,
+            "rows_before": rows_before,
+            "rows_after": rows_after,
+        }
+
+    async def find_member_by_whop_user_id(self, whop_user_id: str) -> Optional[dict]:
+        return await self.consolidate_member_rows(whop_user_id=whop_user_id)
 
     async def find_member_for_telegram(
         self,
         telegram_user_id: int,
         *,
         whop_user_id: str | None = None,
+        platform_user_id: str | None = None,
     ) -> Optional[dict]:
-        """Find a Members row by Telegram ID, then Whop User ID if linked."""
-        if not self.enabled:
-            return None
-        table = self._table(settings.airtable_members_table)
-        match_formula = match(
-            {MembersField.TELEGRAM_USER_ID: str(telegram_user_id)}
+        """Find (and merge) member rows by Telegram ID, Whop ID, or platform user ID."""
+        return await self.consolidate_member_rows(
+            telegram_user_id=telegram_user_id,
+            whop_user_id=whop_user_id,
+            platform_user_id=platform_user_id,
         )
-        existing = await self._run(table.first, formula=match_formula)
-        if existing:
-            return existing
-        if whop_user_id:
-            return await self.find_member_by_whop_user_id(whop_user_id)
-        return None
 
     async def _upsert_member_fields(
         self,
@@ -205,17 +440,34 @@ class AirtableClient:
         fields: dict[str, Any],
         match_formula: dict,
         optional_keys: set[str],
+        telegram_user_id: int | None = None,
+        whop_user_id: str | None = None,
+        platform_user_id: str | None = None,
     ) -> Optional[dict]:
         """Update or create a row; avoid duplicate creates on optional-field failures."""
         table = self._table(settings.airtable_members_table)
         if existing:
             result = await self._run(table.update, existing["id"], fields)
         else:
-            result = await self._run(table.create, fields)
+            recheck = await self.consolidate_member_rows(
+                telegram_user_id=telegram_user_id,
+                whop_user_id=whop_user_id,
+                platform_user_id=platform_user_id,
+            )
+            if recheck:
+                result = await self._run(table.update, recheck["id"], fields)
+            else:
+                result = await self._run(table.create, fields)
         if result is None and any(k in fields for k in optional_keys):
             slim = {k: v for k, v in fields.items() if k not in optional_keys}
             if not existing:
                 existing = await self._run(table.first, formula=match_formula)
+                if not existing:
+                    existing = await self.consolidate_member_rows(
+                        telegram_user_id=telegram_user_id,
+                        whop_user_id=whop_user_id,
+                        platform_user_id=platform_user_id,
+                    )
             if existing:
                 return await self._run(table.update, existing["id"], slim)
             return await self._run(table.create, slim)
@@ -242,75 +494,82 @@ class AirtableClient:
         if not self.enabled:
             return None
 
-        existing = await self.find_member_by_whop_user_id(whop_user_id)
-        table = self._table(settings.airtable_members_table)
-        if not existing and telegram_user_id:
-            existing = await self._run(
-                table.first,
-                formula=match({MembersField.TELEGRAM_USER_ID: str(telegram_user_id)}),
+        async with member_upsert_lock(
+            telegram_user_id=telegram_user_id,
+            whop_user_id=whop_user_id,
+        ):
+            existing = await self.consolidate_member_rows(
+                telegram_user_id=telegram_user_id,
+                whop_user_id=whop_user_id,
+                platform_user_id=platform_user_id,
             )
 
-        fields: dict[str, Any] = {
-            MembersField.WHOP_USER_ID: whop_user_id,
-            MembersField.LAST_ACTIVITY: datetime.now(timezone.utc).isoformat(),
-        }
-        if whop_membership_id:
-            fields[MembersField.WHOP_MEMBERSHIP_ID] = whop_membership_id
-        plan_value = self._plan_field(plan)
-        if plan_value:
-            fields[MembersField.PLAN] = plan_value
-        if status is not None:
-            fields[MembersField.STATUS] = (
-                status.value if isinstance(status, MemberStatus) else str(status)
-            )
-        elif not existing:
-            fields[MembersField.STATUS] = MemberStatus.PENDING.value
-        if join_date:
-            fields[MembersField.JOIN_DATE] = join_date
-        if email:
-            fields[MembersField.EMAIL] = email
-        if name:
-            fields[MembersField.NAME] = name
-        if phone:
-            fields[MembersField.PHONE] = phone
-        platform_value = normalize_trading_platform(platform)
-        if platform_value:
-            fields[MembersField.PLATFORM] = platform_value
-        if platform_user_id:
-            fields[MembersField.PLATFORM_USER_ID] = platform_user_id.strip()
-        if telegram_username:
-            fields[MembersField.TELEGRAM_USERNAME] = telegram_username
-        if telegram_claimed is not None:
-            fields[MembersField.TELEGRAM_CLAIMED] = telegram_claimed
+            fields: dict[str, Any] = {
+                MembersField.WHOP_USER_ID: whop_user_id,
+                MembersField.LAST_ACTIVITY: datetime.now(timezone.utc).isoformat(),
+            }
+            if whop_membership_id:
+                fields[MembersField.WHOP_MEMBERSHIP_ID] = whop_membership_id
+            plan_value = self._plan_field(plan)
+            if plan_value:
+                fields[MembersField.PLAN] = plan_value
+            if status is not None:
+                fields[MembersField.STATUS] = (
+                    status.value if isinstance(status, MemberStatus) else str(status)
+                )
+            elif not existing:
+                fields[MembersField.STATUS] = MemberStatus.PENDING.value
+            if join_date:
+                fields[MembersField.JOIN_DATE] = join_date
+            if email:
+                fields[MembersField.EMAIL] = email
+            if name:
+                fields[MembersField.NAME] = name
+            if phone:
+                fields[MembersField.PHONE] = phone
+            platform_value = normalize_trading_platform(platform)
+            if platform_value:
+                fields[MembersField.PLATFORM] = platform_value
+            if platform_user_id:
+                fields[MembersField.PLATFORM_USER_ID] = platform_user_id.strip()
+            if telegram_username:
+                fields[MembersField.TELEGRAM_USERNAME] = telegram_username
+            if telegram_claimed is not None:
+                fields[MembersField.TELEGRAM_CLAIMED] = telegram_claimed
 
-        if telegram_user_id:
-            fields[MembersField.TELEGRAM_USER_ID] = str(telegram_user_id)
-        elif not existing:
-            fields[MembersField.TELEGRAM_USER_ID] = self._placeholder_telegram_id(
-                whop_user_id
-            )
-        else:
-            existing_tg = (existing.get("fields") or {}).get(
-                MembersField.TELEGRAM_USER_ID
-            )
-            if not existing_tg or self._is_placeholder_telegram_id(str(existing_tg)):
+            if telegram_user_id:
+                fields[MembersField.TELEGRAM_USER_ID] = str(telegram_user_id)
+            elif not existing:
                 fields[MembersField.TELEGRAM_USER_ID] = self._placeholder_telegram_id(
                     whop_user_id
                 )
+            else:
+                existing_tg = (existing.get("fields") or {}).get(
+                    MembersField.TELEGRAM_USER_ID
+                )
+                if not existing_tg or self._is_placeholder_telegram_id(
+                    str(existing_tg)
+                ):
+                    fields[MembersField.TELEGRAM_USER_ID] = (
+                        self._placeholder_telegram_id(whop_user_id)
+                    )
 
-        optional_keys = {
-            MembersField.PHONE,
-            MembersField.PLATFORM,
-            MembersField.PLATFORM_USER_ID,
-            MembersField.TELEGRAM_CLAIMED,
-        }
-        whop_match = match({MembersField.WHOP_USER_ID: whop_user_id})
-        return await self._upsert_member_fields(
-            existing=existing,
-            fields=fields,
-            match_formula=whop_match,
-            optional_keys=optional_keys,
-        )
+            optional_keys = {
+                MembersField.PHONE,
+                MembersField.PLATFORM,
+                MembersField.PLATFORM_USER_ID,
+                MembersField.TELEGRAM_CLAIMED,
+            }
+            whop_match = match({MembersField.WHOP_USER_ID: whop_user_id})
+            return await self._upsert_member_fields(
+                existing=existing,
+                fields=fields,
+                match_formula=whop_match,
+                optional_keys=optional_keys,
+                telegram_user_id=telegram_user_id,
+                whop_user_id=whop_user_id,
+                platform_user_id=platform_user_id,
+            )
 
     async def upsert_member(
         self,
@@ -351,55 +610,59 @@ class AirtableClient:
         if not self.enabled:
             return None
 
-        fields: dict[str, Any] = {
-            MembersField.TELEGRAM_USER_ID: str(telegram_user_id),
-        }
-        if telegram_username:
-            fields[MembersField.TELEGRAM_USERNAME] = telegram_username
-        if name:
-            fields[MembersField.NAME] = name
-        if whop_membership_id:
-            fields[MembersField.WHOP_MEMBERSHIP_ID] = whop_membership_id
-        plan_value = self._plan_field(plan)
-        if plan_value:
-            fields[MembersField.PLAN] = plan_value
-        if status is not None:
-            fields[MembersField.STATUS] = (
-                status.value if isinstance(status, MemberStatus) else str(status)
+        async with member_upsert_lock(telegram_user_id=telegram_user_id):
+            fields: dict[str, Any] = {
+                MembersField.TELEGRAM_USER_ID: str(telegram_user_id),
+            }
+            if telegram_username:
+                fields[MembersField.TELEGRAM_USERNAME] = telegram_username
+            if name:
+                fields[MembersField.NAME] = name
+            if whop_membership_id:
+                fields[MembersField.WHOP_MEMBERSHIP_ID] = whop_membership_id
+            plan_value = self._plan_field(plan)
+            if plan_value:
+                fields[MembersField.PLAN] = plan_value
+            if status is not None:
+                fields[MembersField.STATUS] = (
+                    status.value if isinstance(status, MemberStatus) else str(status)
+                )
+            if join_date:
+                fields[MembersField.JOIN_DATE] = join_date
+            if email:
+                fields[MembersField.EMAIL] = email
+            if phone:
+                fields[MembersField.PHONE] = phone
+            platform_value = normalize_trading_platform(platform)
+            if platform_value:
+                fields[MembersField.PLATFORM] = platform_value
+            if platform_user_id:
+                fields[MembersField.PLATFORM_USER_ID] = platform_user_id.strip()
+            if telegram_claimed is not None:
+                fields[MembersField.TELEGRAM_CLAIMED] = telegram_claimed
+            fields[MembersField.LAST_ACTIVITY] = datetime.now(timezone.utc).isoformat()
+
+            match_formula = match(
+                {MembersField.TELEGRAM_USER_ID: str(telegram_user_id)}
             )
-        if join_date:
-            fields[MembersField.JOIN_DATE] = join_date
-        if email:
-            fields[MembersField.EMAIL] = email
-        if phone:
-            fields[MembersField.PHONE] = phone
-        platform_value = normalize_trading_platform(platform)
-        if platform_value:
-            fields[MembersField.PLATFORM] = platform_value
-        if platform_user_id:
-            fields[MembersField.PLATFORM_USER_ID] = platform_user_id.strip()
-        if telegram_claimed is not None:
-            fields[MembersField.TELEGRAM_CLAIMED] = telegram_claimed
-        fields[MembersField.LAST_ACTIVITY] = datetime.now(timezone.utc).isoformat()
-
-        table = self._table(settings.airtable_members_table)
-        match_formula = match({MembersField.TELEGRAM_USER_ID: str(telegram_user_id)})
-
-        existing = await self.find_member_for_telegram(
-            telegram_user_id, whop_user_id=whop_user_id
-        )
-        optional_keys = {
-            MembersField.PHONE,
-            MembersField.PLATFORM,
-            MembersField.PLATFORM_USER_ID,
-            MembersField.TELEGRAM_CLAIMED,
-        }
-        return await self._upsert_member_fields(
-            existing=existing,
-            fields=fields,
-            match_formula=match_formula,
-            optional_keys=optional_keys,
-        )
+            existing = await self.consolidate_member_rows(
+                telegram_user_id=telegram_user_id,
+                platform_user_id=platform_user_id,
+            )
+            optional_keys = {
+                MembersField.PHONE,
+                MembersField.PLATFORM,
+                MembersField.PLATFORM_USER_ID,
+                MembersField.TELEGRAM_CLAIMED,
+            }
+            return await self._upsert_member_fields(
+                existing=existing,
+                fields=fields,
+                match_formula=match_formula,
+                optional_keys=optional_keys,
+                telegram_user_id=telegram_user_id,
+                platform_user_id=platform_user_id,
+            )
 
     @staticmethod
     def _plan_field(plan: str | None) -> str | None:
@@ -478,6 +741,7 @@ class AirtableClient:
         name: str | None = None,
         status: MemberStatus | str | None = None,
         whop_user_id: str | None = None,
+        platform_user_id: str | None = None,
     ) -> Optional[dict]:
         """Append a line to the member Notes field (creates row if missing)."""
         if not self.enabled:
@@ -488,9 +752,12 @@ class AirtableClient:
             name=name,
             status=status,
             whop_user_id=whop_user_id,
+            platform_user_id=platform_user_id,
         )
         existing = await self.find_member_for_telegram(
-            telegram_user_id, whop_user_id=whop_user_id
+            telegram_user_id,
+            whop_user_id=whop_user_id,
+            platform_user_id=platform_user_id,
         )
         if not existing:
             return None
@@ -500,6 +767,7 @@ class AirtableClient:
             MembersField.NOTES: merged,
             MembersField.LAST_ACTIVITY: datetime.now(timezone.utc).isoformat(),
         }
+        table = self._table(settings.airtable_members_table)
         return await self._run(table.update, existing["id"], fields)
 
     async def record_terms_accepted(
@@ -537,6 +805,7 @@ class AirtableClient:
 
         completed_at = datetime.now(timezone.utc).isoformat()
         fields: dict[str, Any] = {
+            MembersField.TELEGRAM_USER_ID: str(telegram_user_id),
             MembersField.ONBOARDING_COMPLETED: True,
             MembersField.ONBOARDING_COMPLETED_AT: completed_at,
             MembersField.STATUS: MemberStatus.ACTIVE.value,
@@ -555,21 +824,22 @@ class AirtableClient:
             fields[MembersField.PLATFORM] = platform_value
         if platform_user_id:
             fields[MembersField.PLATFORM_USER_ID] = platform_user_id.strip()
-
-        existing = await self.find_member_for_telegram(
-            telegram_user_id, whop_user_id=whop_user_id
-        )
-        if existing:
-            return await self._run(table.update, existing["id"], fields)
-
-        create_fields = {
-            MembersField.TELEGRAM_USER_ID: str(telegram_user_id),
-            **fields,
-        }
         if telegram_username:
-            create_fields[MembersField.TELEGRAM_USERNAME] = telegram_username
-        table = self._table(settings.airtable_members_table)
-        return await self._run(table.create, create_fields)
+            fields[MembersField.TELEGRAM_USERNAME] = telegram_username
+
+        async with member_upsert_lock(
+            telegram_user_id=telegram_user_id,
+            whop_user_id=whop_user_id,
+        ):
+            table = self._table(settings.airtable_members_table)
+            existing = await self.consolidate_member_rows(
+                telegram_user_id=telegram_user_id,
+                whop_user_id=whop_user_id,
+                platform_user_id=platform_user_id,
+            )
+            if existing:
+                return await self._run(table.update, existing["id"], fields)
+            return await self._run(table.create, fields)
 
     async def find_member_record_id(
         self, telegram_user_id: int, *, whop_user_id: str | None = None

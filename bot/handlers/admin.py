@@ -553,11 +553,15 @@ async def cmd_sync(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         )
         airtable_synced += 1
 
+    dedupe = await airtable_sync.reconcile_members_table()
+
     body = (
         "🔄 *Sync complete*\n\n"
         f"• Memberships fetched: *{fetched}*\n"
         f"• Already linked + refreshed: *{linked}*\n"
         f"• Awaiting `/claim` link: *{pending}*\n"
-        f"• Airtable rows upserted: *{airtable_synced}*"
+        f"• Airtable rows upserted: *{airtable_synced}*\n"
+        f"• Duplicate groups merged: *{dedupe.get('groups_merged', 0)}* "
+        f"(`{dedupe.get('rows_before', 0)}` → `{dedupe.get('rows_after', 0)}` rows)"
     )
     await update.message.reply_text(body, parse_mode=ParseMode.MARKDOWN)
