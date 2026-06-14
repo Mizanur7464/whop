@@ -9,11 +9,16 @@ from telegram.error import BadRequest, TelegramError
 
 
 def is_stale_callback_error(err: BaseException) -> bool:
-    """True when the user tapped an expired inline button."""
+    """True when the callback query can no longer be answered."""
     if not isinstance(err, BadRequest):
         return False
     msg = str(err).lower()
-    return "query is too old" in msg or "query id is invalid" in msg
+    return (
+        "query is too old" in msg
+        or "query id is invalid" in msg
+        or "query has already been answered" in msg
+        or "response timeout expired" in msg
+    )
 
 
 def is_markdown_parse_error(err: BaseException) -> bool:

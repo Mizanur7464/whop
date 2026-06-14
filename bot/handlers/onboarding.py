@@ -11,6 +11,7 @@ Callback prefixes:
 
 from __future__ import annotations
 
+import asyncio
 import html
 from datetime import datetime, timezone
 from pathlib import Path
@@ -32,7 +33,7 @@ from bot.onboarding_alerts import (
 from bot.decorators import log_call
 from bot.channel_context import block_if_group_chat, ensure_welcome_context
 from bot.community_layout import FLOW_WELCOME
-from bot.messaging import send_document, send_text
+from bot.messaging import send_cached_pdf, send_document, send_text
 from bot.telegram_utils import (
     escape_markdown,
     is_markdown_parse_error,
@@ -73,6 +74,16 @@ def _contact_names_complete(record: dict) -> bool:
 def _onb_action(data: str) -> str:
     """Return the part after ``onb:`` (supports values like ``loc:uae``)."""
     return data[4:] if data.startswith("onb:") else ""
+
+
+async def _strip_review_buttons(query) -> None:
+    """Remove Approve/Reject buttons so admins cannot double-click."""
+    if not query or not query.message:
+        return
+    try:
+        await query.edit_message_reply_markup(reply_markup=None)
+    except BadRequest:
+        pass
 
 
 def _msg(template: str, **kwargs: str) -> str:
@@ -187,12 +198,21 @@ async def _send_location_doc(
     set_onboarding_step(context, user.id, "location_pdf")
     storage.upsert_user(user.id, location=loc.id, platform=loc.platform)
     name = " ".join(p for p in [user.first_name, user.last_name] if p) or None
-    await airtable_sync.member_platform_selected(
-        telegram_user_id=user.id,
-        telegram_username=user.username,
-        name=name,
-        platform=loc.platform,
-    )
+
+    async def _sync_platform() -> None:
+        try:
+            await airtable_sync.member_platform_selected(
+                telegram_user_id=user.id,
+                telegram_username=user.username,
+                name=name,
+                platform=loc.platform,
+            )
+        except Exception as e:
+            logger.warning(
+                f"onboarding: Airtable platform sync failed user={user.id}: {e}"
+            )
+
+    asyncio.create_task(_sync_platform(), name=f"platform-sync-{user.id}")
 
     caption = loc.doc.caption or f"{loc.platform} onboarding instructions"
     pdf_path = Path(loc.doc.path) if loc.doc.path else None
@@ -200,14 +220,13 @@ async def _send_location_doc(
 
     if pdf_path and pdf_path.is_file():
         try:
-            with pdf_path.open("rb") as f:
-                pdf_ok = await send_document(
-                    update,
-                    context,
-                    f,
-                    caption=caption,
-                    flow=FLOW_WELCOME,
-                )
+            pdf_ok = await send_cached_pdf(
+                update,
+                context,
+                pdf_path,
+                caption=caption,
+                flow=FLOW_WELCOME,
+            )
             if pdf_ok:
                 return
             logger.warning(
@@ -296,8 +315,12 @@ async def show_continue(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     user = update.effective_user
     set_onboarding_step(context, user.id, "continue")
     if not _all_checklist_done(user.id):
-        await update.callback_query.answer(
-            "Please complete all checklist steps first.", show_alert=True
+        await send_text(
+            update,
+            context,
+            "Please complete all checklist steps first.",
+            flow=FLOW_WELCOME,
+            parse_mode=None,
         )
         return
 
@@ -320,8 +343,12 @@ async def show_terms(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     user = update.effective_user
     set_onboarding_step(context, user.id, "terms")
     if not _all_checklist_done(user.id):
-        await update.callback_query.answer(
-            "Please complete all checklist steps first.", show_alert=True
+        await send_text(
+            update,
+            context,
+            "Please complete all checklist steps first.",
+            flow=FLOW_WELCOME,
+            parse_mode=None,
         )
         return
 
@@ -376,8 +403,12 @@ async def accept_terms(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     user = update.effective_user
     set_onboarding_step(context, user.id, "terms_accept")
     if not _all_checklist_done(user.id):
-        await update.callback_query.answer(
-            "Please complete all checklist steps first.", show_alert=True
+        await send_text(
+            update,
+            context,
+            "Please complete all checklist steps first.",
+            flow=FLOW_WELCOME,
+            parse_mode=None,
         )
         return
 
@@ -390,16 +421,22 @@ async def accept_terms(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     )
 
     name = " ".join(p for p in [user.first_name, user.last_name] if p) or None
-    await airtable_sync.terms_accepted(
-        telegram_user_id=user.id,
-        telegram_username=user.username,
-        name=name,
-        accepted_at_iso=now,
-    )
-    await _notify_admins_terms_accepted(context, user, now)
+
+    async def _sync_terms() -> None:
+        try:
+            await airtable_sync.terms_accepted(
+                telegram_user_id=user.id,
+                telegram_username=user.username,
+                name=name,
+                accepted_at_iso=now,
+            )
+            await _notify_admins_terms_accepted(context, user, now)
+        except Exception as e:
+            logger.warning(f"onboarding: terms sync failed user={user.id}: {e}")
+
+    asyncio.create_task(_sync_terms(), name=f"terms-sync-{user.id}")
 
     cfg = onboarding_config.get()
-    await update.callback_query.answer("Accepted ✅")
     await _send_new_message(update, context, cfg.screenshot_request_message, None)
 
 
@@ -441,8 +478,6 @@ async def show_contact_intro(
         + "\n\n"
         + prompt
     )
-    if update.callback_query:
-        await update.callback_query.answer()
     await _send_new_message(update, context, text, None)
 
 
@@ -640,52 +675,125 @@ async def on_screenshot_photo(
     await _notify_admins_for_review(context, user, file_id)
 
 
+async def _finish_admin_approve(
+    context: ContextTypes.DEFAULT_TYPE,
+    update: Update,
+    admin,
+    target_user_id: int,
+    local_user: dict,
+) -> None:
+    try:
+        plan = local_user.get("plan")
+        await airtable_sync.onboarding_completed(
+            target_user_id,
+            plan=plan,
+            name=_contact_full_name(local_user),
+            phone=local_user.get("contact_phone"),
+            platform=local_user.get("platform"),
+            platform_user_id=local_user.get("platform_user_id"),
+        )
+        await airtable_sync.member_status_changed(target_user_id, "active")
+        await unlock_for_user(target_user_id)
+        await _mark_review_message_decided(
+            update,
+            decision="approved",
+            actor=admin,
+            target_user_id=target_user_id,
+            record=local_user,
+        )
+        await _notify_all_admins_review_decision(
+            context,
+            decision="approved",
+            actor=admin,
+            target_user_id=target_user_id,
+            record=local_user,
+        )
+    except Exception as e:
+        logger.exception(f"onboarding approve follow-up failed tg={target_user_id}: {e}")
+        await notify_admins_onboarding_issue(
+            context,
+            user=admin,
+            step="callback",
+            detail=f"Approve follow-up for user {target_user_id} failed",
+            error=e,
+        )
+
+
+async def _finish_admin_reject(
+    context: ContextTypes.DEFAULT_TYPE,
+    update: Update,
+    admin,
+    target_user_id: int,
+    local_user: dict,
+    reason: str,
+) -> None:
+    cfg = onboarding_config.get()
+    try:
+        await safe_send_message(
+            context.bot,
+            target_user_id,
+            cfg.rejected_message.format(reason=escape_markdown(reason)),
+            parse_mode=ParseMode.MARKDOWN,
+        )
+        await _mark_review_message_decided(
+            update,
+            decision="rejected",
+            actor=admin,
+            target_user_id=target_user_id,
+            record=local_user,
+        )
+        await _notify_all_admins_review_decision(
+            context,
+            decision="rejected",
+            actor=admin,
+            target_user_id=target_user_id,
+            record=local_user,
+        )
+    except Exception as e:
+        logger.exception(f"onboarding reject follow-up failed tg={target_user_id}: {e}")
+        await notify_admins_onboarding_issue(
+            context,
+            user=admin,
+            step="callback",
+            detail=f"Reject follow-up for user {target_user_id} failed",
+            error=e,
+        )
+
+
 async def _admin_approve(
     update: Update, context: ContextTypes.DEFAULT_TYPE, target_user_id: int
 ) -> None:
     admin = update.effective_user
+    query = update.callback_query
     if not admin or not _is_review_admin(admin.id):
-        await update.callback_query.answer(
-            "Only onboarding reviewers can approve.", show_alert=True
-        )
+        if admin:
+            await safe_send_message(
+                context.bot,
+                admin.id,
+                "Only onboarding reviewers can approve.",
+                parse_mode=None,
+            )
         return
 
     if storage.get_approval_status(target_user_id) != storage.APPROVAL_PENDING_REVIEW:
-        await update.callback_query.answer(
-            "This user is not awaiting review.", show_alert=True
+        await safe_send_message(
+            context.bot,
+            admin.id,
+            "This user is not awaiting review.",
+            parse_mode=None,
         )
         return
+
+    await _strip_review_buttons(query)
 
     storage.set_approval_status(target_user_id, storage.APPROVAL_APPROVED)
     storage.mark_onboarding_completed(target_user_id)
     jobs.cancel_user_reminders(context.application, target_user_id)
     local_user = storage.get_user(target_user_id) or {}
-    plan = local_user.get("plan")
-    await airtable_sync.onboarding_completed(
-        target_user_id,
-        plan=plan,
-        name=_contact_full_name(local_user),
-        phone=local_user.get("contact_phone"),
-        platform=local_user.get("platform"),
-        platform_user_id=local_user.get("platform_user_id"),
-    )
-    await airtable_sync.member_status_changed(target_user_id, "active")
-    await unlock_for_user(target_user_id)
 
-    await update.callback_query.answer("Approved ✅ — user unlocked")
-    await _mark_review_message_decided(
-        update,
-        decision="approved",
-        actor=admin,
-        target_user_id=target_user_id,
-        record=local_user,
-    )
-    await _notify_all_admins_review_decision(
-        context,
-        decision="approved",
-        actor=admin,
-        target_user_id=target_user_id,
-        record=local_user,
+    asyncio.create_task(
+        _finish_admin_approve(context, update, admin, target_user_id, local_user),
+        name=f"approve-{target_user_id}",
     )
 
 
@@ -693,45 +801,39 @@ async def _admin_reject(
     update: Update, context: ContextTypes.DEFAULT_TYPE, target_user_id: int
 ) -> None:
     admin = update.effective_user
+    query = update.callback_query
     if not admin or not _is_review_admin(admin.id):
-        await update.callback_query.answer(
-            "Only onboarding reviewers can reject.", show_alert=True
-        )
+        if admin:
+            await safe_send_message(
+                context.bot,
+                admin.id,
+                "Only onboarding reviewers can reject.",
+                parse_mode=None,
+            )
         return
 
     if storage.get_approval_status(target_user_id) != storage.APPROVAL_PENDING_REVIEW:
-        await update.callback_query.answer(
-            "This user is not awaiting review.", show_alert=True
+        await safe_send_message(
+            context.bot,
+            admin.id,
+            "This user is not awaiting review.",
+            parse_mode=None,
         )
         return
 
+    await _strip_review_buttons(query)
+
     storage.set_approval_status(target_user_id, storage.APPROVAL_AWAITING_SCREENSHOT)
-    cfg = onboarding_config.get()
+    local_user = storage.get_user(target_user_id) or {}
     reason = (
         "The screenshot wasn't clear enough or didn't show a linked trading account."
     )
-    await safe_send_message(
-        context.bot,
-        target_user_id,
-        cfg.rejected_message.format(reason=escape_markdown(reason)),
-        parse_mode=ParseMode.MARKDOWN,
-    )
 
-    await update.callback_query.answer("Rejected — user asked to resubmit")
-    local_user = storage.get_user(target_user_id) or {}
-    await _mark_review_message_decided(
-        update,
-        decision="rejected",
-        actor=admin,
-        target_user_id=target_user_id,
-        record=local_user,
-    )
-    await _notify_all_admins_review_decision(
-        context,
-        decision="rejected",
-        actor=admin,
-        target_user_id=target_user_id,
-        record=local_user,
+    asyncio.create_task(
+        _finish_admin_reject(
+            context, update, admin, target_user_id, local_user, reason
+        ),
+        name=f"reject-{target_user_id}",
     )
 
 
@@ -747,9 +849,9 @@ async def on_onboarding_callback(
         return
 
     query = update.callback_query
-    await safe_answer_callback(query)
     data = query.data or "" if query else ""
     action = _onb_action(data)
+    await safe_answer_callback(query)
     user = update.effective_user
     logger.info(f"onboarding callback: {data!r} -> action={action!r}")
 
@@ -770,12 +872,21 @@ async def on_onboarding_callback(
             detail=f"Action {data!r} failed",
             error=e,
         )
-        await safe_send_message(
-            context.bot,
-            user.id,
-            "Something went wrong. Please send /onboarding to try again.",
-            parse_mode=None,
-        )
+        head = action.split(":", 1)[0]
+        if head in ("approve", "reject"):
+            await safe_send_message(
+                context.bot,
+                user.id,
+                "Review action failed. Please try again or contact support.",
+                parse_mode=None,
+            )
+        else:
+            await safe_send_message(
+                context.bot,
+                user.id,
+                "Something went wrong. Please send /onboarding to try again.",
+                parse_mode=None,
+            )
 
 
 async def _dispatch_onboarding_action(
@@ -805,14 +916,24 @@ async def _dispatch_onboarding_action(
         try:
             target_id = int(action.split(":", 1)[1])
         except ValueError:
-            await update.callback_query.answer("Invalid user.", show_alert=True)
+            await safe_send_message(
+                context.bot,
+                update.effective_user.id,
+                "Invalid user.",
+                parse_mode=None,
+            )
             return
         await _admin_approve(update, context, target_id)
     elif action.startswith("reject:"):
         try:
             target_id = int(action.split(":", 1)[1])
         except ValueError:
-            await update.callback_query.answer("Invalid user.", show_alert=True)
+            await safe_send_message(
+                context.bot,
+                update.effective_user.id,
+                "Invalid user.",
+                parse_mode=None,
+            )
             return
         await _admin_reject(update, context, target_id)
     else:
