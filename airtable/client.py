@@ -838,8 +838,16 @@ class AirtableClient:
                 platform_user_id=platform_user_id,
             )
             if existing:
-                return await self._run(table.update, existing["id"], fields)
-            return await self._run(table.create, fields)
+                result = await self._run(table.update, existing["id"], fields)
+            else:
+                result = await self._run(table.create, fields)
+            if not result or not (result.get("fields") or {}).get(
+                MembersField.ONBOARDING_COMPLETED
+            ):
+                logger.error(
+                    f"Airtable: Onboarding Completed not persisted tg={telegram_user_id}"
+                )
+            return result
 
     async def find_member_record_id(
         self, telegram_user_id: int, *, whop_user_id: str | None = None

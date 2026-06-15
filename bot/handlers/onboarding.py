@@ -47,6 +47,27 @@ from bot.welcome_docs import location_by_id, get as get_welcome_docs
 CONTACT_STEP_KEY = "onboarding_contact_step"
 
 
+async def _onboarding_blocked_for_user(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> bool:
+    """True when an active member should not re-enter onboarding."""
+    user = update.effective_user
+    if not user:
+        return True
+    if storage.can_restart_onboarding(user.id):
+        return False
+    if storage.is_fully_activated(user.id):
+        cfg = onboarding_config.get()
+        await safe_send_message(
+            context.bot,
+            user.id,
+            cfg.idle_after_complete_message,
+            parse_mode=None,
+        )
+        return True
+    return False
+
+
 def onboarding_contact_active(_: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     return context.user_data.get(CONTACT_STEP_KEY) in (
         "first_name",
@@ -147,6 +168,9 @@ async def _send_new_message(
 
 async def show_welcome(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Step 1: Nice welcome message only."""
+    if await _onboarding_blocked_for_user(update, context):
+        return
+
     cfg = onboarding_config.get()
     user = update.effective_user
     set_onboarding_step(context, user.id, "welcome")
@@ -684,7 +708,7 @@ async def _finish_admin_approve(
 ) -> None:
     try:
         plan = local_user.get("plan")
-        await airtable_sync.onboarding_completed(
+        crm_ok = await airtable_sync.onboarding_completed(
             target_user_id,
             plan=plan,
             name=_contact_full_name(local_user),
@@ -692,7 +716,17 @@ async def _finish_admin_approve(
             platform=local_user.get("platform"),
             platform_user_id=local_user.get("platform_user_id"),
         )
-        await airtable_sync.member_status_changed(target_user_id, "active")
+        if not crm_ok:
+            await notify_admins_onboarding_issue(
+                context,
+                user=admin,
+                step="callback",
+                detail=(
+                    f"CRM Onboarding Completed checkbox was NOT updated for user "
+                    f"{target_user_id}. User was still unlocked. "
+                    f"Run /fix_onboarding_crm to backfill."
+                ),
+            )
         await unlock_for_user(target_user_id)
         await _mark_review_message_decided(
             update,
@@ -788,6 +822,7 @@ async def _admin_approve(
 
     storage.set_approval_status(target_user_id, storage.APPROVAL_APPROVED)
     storage.mark_onboarding_completed(target_user_id)
+    storage.clear_membership_inactive(target_user_id)
     jobs.cancel_user_reminders(context.application, target_user_id)
     local_user = storage.get_user(target_user_id) or {}
 
@@ -857,6 +892,10 @@ async def on_onboarding_callback(
 
     if not user:
         return
+
+    if not action.startswith(("approve:", "reject:")):
+        if await _onboarding_blocked_for_user(update, context):
+            return
 
     try:
         await _dispatch_onboarding_action(update, context, action=action)
@@ -942,23 +981,17 @@ async def _dispatch_onboarding_action(
 
 @log_call
 async def cmd_onboarding(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """`/onboarding` — restart the welcome flow (for testing)."""
+    """`/onboarding` — restart welcome flow (blocked for active members)."""
     if not await ensure_welcome_context(update, context):
         return
 
     user = update.effective_user
     if not user:
         return
-    storage.upsert_user(
-        user.id,
-        onboarding_completed=False,
-        onboarding_completed_at=None,
-        approval_status=storage.APPROVAL_NONE,
-        screenshot_file_id=None,
-        terms_accepted_at=None,
-        terms_accepted=False,
-        checklist={},
-    )
+    if await _onboarding_blocked_for_user(update, context):
+        return
+
+    storage.reset_onboarding_progress(user.id)
     await show_welcome(update, context)
 
 

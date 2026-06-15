@@ -10,6 +10,7 @@ from telegram.constants import ChatMemberStatus, ParseMode
 from telegram.ext import ContextTypes
 
 from airtable import sync as airtable_sync
+from bot import storage
 from bot.leave_survey_config import get as leave_cfg
 from config import settings
 
@@ -62,6 +63,16 @@ async def on_chat_member(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     user = cm.new_chat_member.user
     if not user or user.is_bot:
         return
+
+    when = datetime.now(timezone.utc).isoformat()
+    await airtable_sync.member_left_telegram(
+        telegram_user_id=user.id,
+        telegram_username=user.username,
+        name=user.full_name,
+        left_at_iso=when,
+        group_name=_group_label(group_key),
+    )
+    storage.mark_membership_inactive(user.id, reason="left")
 
     cfg = leave_cfg()
     markup = InlineKeyboardMarkup(

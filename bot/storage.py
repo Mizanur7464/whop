@@ -118,6 +118,16 @@ def list_active_user_ids() -> list[int]:
     return [uid for uid, u in _users.items() if u.get("status") == "active"]
 
 
+def list_onboarding_approved_user_ids() -> list[int]:
+    """Users approved through onboarding (for CRM backfill)."""
+    return [
+        uid
+        for uid, u in _users.items()
+        if u.get("approval_status") == APPROVAL_APPROVED
+        or u.get("onboarding_completed")
+    ]
+
+
 def stats() -> dict:
     today = datetime.now(timezone.utc).date().isoformat()
     total = len(_users)
@@ -254,6 +264,56 @@ def is_fully_activated(user_id: int) -> bool:
 
 def needs_onboarding_flow(user_id: int) -> bool:
     return not is_fully_activated(user_id)
+
+
+def can_restart_onboarding(user_id: int) -> bool:
+    """True when user may run /onboarding again (left, expired, or never finished)."""
+    user = get_user(user_id)
+    if not user:
+        return True
+    if user.get("membership_inactive"):
+        return True
+    return not is_fully_activated(user_id)
+
+
+def reset_onboarding_progress(user_id: int) -> dict:
+    """Clear onboarding/approval state; keep Whop link and contact fields."""
+    return upsert_user(
+        user_id,
+        onboarding_completed=False,
+        onboarding_completed_at=None,
+        approval_status=APPROVAL_NONE,
+        screenshot_file_id=None,
+        terms_accepted_at=None,
+        terms_accepted=False,
+        checklist={},
+        membership_inactive=False,
+        membership_inactive_reason=None,
+    )
+
+
+def mark_membership_inactive(user_id: int, *, reason: str) -> dict:
+    """Allow re-onboarding after Telegram leave or Whop expiry (same CRM row)."""
+    return upsert_user(
+        user_id,
+        membership_inactive=True,
+        membership_inactive_reason=reason,
+        approval_status=APPROVAL_NONE,
+        onboarding_completed=False,
+        onboarding_completed_at=None,
+        checklist={},
+        terms_accepted=False,
+        terms_accepted_at=None,
+        screenshot_file_id=None,
+    )
+
+
+def clear_membership_inactive(user_id: int) -> dict:
+    return upsert_user(
+        user_id,
+        membership_inactive=False,
+        membership_inactive_reason=None,
+    )
 
 
 # ---------- Manual approval (screenshot review) ----------

@@ -319,6 +319,7 @@ async def on_membership_invalid(payload: dict) -> None:
         chats = tuple(plan_mapping.all_known_chats())
 
     storage.set_status(tg_id, "expired")
+    storage.mark_membership_inactive(tg_id, reason="expired")
     result = await telegram_ops.revoke_access(
         tg_id, chats, reason="membership ended"
     )

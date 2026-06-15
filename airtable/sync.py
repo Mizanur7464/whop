@@ -12,13 +12,14 @@ Telegram side fully functional even when Airtable is down.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 from typing import Optional
 
 from loguru import logger
 
 from airtable.client import AirtableClient
-from airtable.schema import MemberStatus, PaymentStatus
+from airtable.schema import MemberStatus, MembersField, PaymentStatus
 
 
 _client: Optional[AirtableClient] = None
@@ -159,6 +160,7 @@ async def member_status_changed(telegram_user_id: int, status: str) -> None:
         "expired": MemberStatus.EXPIRED,
         "banned": MemberStatus.BANNED,
         "pending": MemberStatus.PENDING,
+        "left": MemberStatus.LEFT,
     }
     canonical = mapping.get(status.lower(), MemberStatus.PENDING)
 
@@ -205,28 +207,85 @@ async def onboarding_completed(
     platform: str | None = None,
     platform_user_id: str | None = None,
     name: str | None = None,
-) -> None:
+) -> bool:
+    """Mark onboarding complete in CRM. Returns True when checkbox is confirmed set."""
     c = client()
     if not c.enabled:
-        return
-    try:
-        linked = _linked_whop(telegram_user_id)
-        from bot import storage
-
-        user = storage.get_user(telegram_user_id) or {}
-        await c.mark_onboarding_complete(
-            telegram_user_id,
-            plan=plan or linked.get("plan"),
-            phone=phone,
-            platform=platform,
-            platform_user_id=platform_user_id,
-            name=name,
-            telegram_username=user.get("username"),
-            whop_user_id=linked.get("whop_user_id"),
+        logger.warning(
+            f"Airtable disabled — onboarding checkbox not updated tg={telegram_user_id}"
         )
-        logger.info(f"Airtable: onboarding done tg={telegram_user_id}")
-    except Exception as e:
-        logger.warning(f"Airtable onboarding_completed failed: {e}")
+        return False
+
+    from bot import storage
+
+    linked = _linked_whop(telegram_user_id)
+    user = storage.get_user(telegram_user_id) or {}
+    last_err = "unknown"
+    for attempt in range(1, 4):
+        try:
+            result = await c.mark_onboarding_complete(
+                telegram_user_id,
+                plan=plan or linked.get("plan"),
+                phone=phone,
+                platform=platform,
+                platform_user_id=platform_user_id,
+                name=name,
+                telegram_username=user.get("username"),
+                whop_user_id=linked.get("whop_user_id"),
+            )
+            if result and (result.get("fields") or {}).get(
+                MembersField.ONBOARDING_COMPLETED
+            ):
+                logger.info(f"Airtable: onboarding done tg={telegram_user_id}")
+                return True
+            last_err = "checkbox not set on Airtable row"
+            logger.warning(
+                f"Airtable onboarding_completed attempt {attempt}/3: {last_err} "
+                f"tg={telegram_user_id}"
+            )
+        except Exception as e:
+            last_err = str(e)
+            logger.warning(
+                f"Airtable onboarding_completed attempt {attempt}/3 tg={telegram_user_id}: {e}"
+            )
+        if attempt < 3:
+            await asyncio.sleep(attempt)
+
+    logger.error(
+        f"Airtable onboarding_completed failed tg={telegram_user_id}: {last_err}"
+    )
+    return False
+
+
+async def backfill_onboarding_completed_in_crm() -> dict[str, int]:
+    """Re-sync Onboarding Completed checkbox for all locally approved users."""
+    from bot import storage
+
+    ok = 0
+    failed = 0
+    for user_id in storage.list_onboarding_approved_user_ids():
+        record = storage.get_user(user_id) or {}
+        success = await onboarding_completed(
+            user_id,
+            plan=record.get("plan"),
+            phone=record.get("contact_phone"),
+            platform=record.get("platform"),
+            platform_user_id=record.get("platform_user_id"),
+            name=" ".join(
+                p
+                for p in [
+                    record.get("contact_first_name"),
+                    record.get("contact_last_name"),
+                ]
+                if p
+            ).strip()
+            or None,
+        )
+        if success:
+            ok += 1
+        else:
+            failed += 1
+    return {"ok": ok, "failed": failed}
 
 
 async def reconcile_members_table() -> dict[str, int]:
@@ -367,6 +426,43 @@ async def member_contact_collected(
         logger.warning(f"Airtable member_contact_collected failed: {e}")
 
 
+async def member_left_telegram(
+    *,
+    telegram_user_id: int,
+    telegram_username: str | None,
+    name: str | None,
+    left_at_iso: str,
+    group_name: str | None = None,
+) -> None:
+    """User left a monitored Telegram group — set Status=Left (Whop may still be active)."""
+    c = client()
+    if not c.enabled:
+        return
+    where = group_name or "group"
+    note = f"Left {where} at {left_at_iso} (Telegram group)"
+    try:
+        linked = _linked_whop(telegram_user_id)
+        await c.upsert_member(
+            telegram_user_id=telegram_user_id,
+            telegram_username=telegram_username,
+            name=name,
+            status=MemberStatus.LEFT,
+            whop_user_id=linked.get("whop_user_id"),
+        )
+        await c.append_member_note(
+            telegram_user_id,
+            note,
+            telegram_username=telegram_username,
+            name=name,
+            whop_user_id=linked.get("whop_user_id"),
+        )
+        logger.info(
+            f"Airtable: telegram left tg={telegram_user_id} group={where!r}"
+        )
+    except Exception as e:
+        logger.warning(f"Airtable member_left_telegram failed: {e}")
+
+
 async def member_left_group(
     *,
     telegram_user_id: int,
@@ -376,11 +472,12 @@ async def member_left_group(
     left_at_iso: str,
     group_name: str | None = None,
 ) -> None:
+    """User submitted a leave reason after the leave survey DM."""
     c = client()
     if not c.enabled:
         return
     where = group_name or "group"
-    note = f"Left {where} at {left_at_iso}: {reason}"
+    note = f"Leave reason ({where}): {reason}"
     try:
         linked = _linked_whop(telegram_user_id)
         await c.append_member_note(
@@ -390,7 +487,7 @@ async def member_left_group(
             name=name,
             whop_user_id=linked.get("whop_user_id"),
         )
-        logger.info(f"Airtable: left group tg={telegram_user_id} reason={reason!r}")
+        logger.info(f"Airtable: leave reason tg={telegram_user_id} reason={reason!r}")
     except Exception as e:
         logger.warning(f"Airtable member_left_group failed: {e}")
 

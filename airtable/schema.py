@@ -43,6 +43,7 @@ class MemberStatus(str, Enum):
     EXPIRED = "Expired"
     BANNED = "Banned"
     PENDING = "Pending"
+    LEFT = "Left"
 
 
 class TradingPlatform(str, Enum):

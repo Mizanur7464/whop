@@ -28,6 +28,8 @@ _FINANCE_SELECT_FIXES: dict[str, list[str]] = {
     FinanceField.TYPE: ["Payment", "Expense"],
 }
 
+_MEMBERS_STATUS_CHOICES = ["Active", "Expired", "Banned", "Pending", "Left"]
+
 _DEPRECATED_EXPENSES_NAME = "Expenses (deprecated — use Payments)"
 
 
@@ -169,6 +171,69 @@ def _fix_finance_field_types(
     return fixed, errors
 
 
+def _choice_name(choice: Any) -> str:
+    if isinstance(choice, dict):
+        return str(choice.get("name") or "")
+    return str(getattr(choice, "name", choice) or "")
+
+
+def _choice_id(choice: Any) -> str | None:
+    if isinstance(choice, dict):
+        return choice.get("id")
+    return getattr(choice, "id", None)
+
+
+def _ensure_members_status_choices(
+    api,
+    *,
+    base_id: str,
+    api_table,
+    base_schema,
+) -> tuple[list[str], list[str]]:
+    """Add ``Left`` to Members Status if the select exists but lacks that option."""
+    field = _get_field_schema(base_schema, api_table.name, "Status")
+    if field is None:
+        return [], []
+    if field.type != "singleSelect":
+        return [], []
+
+    options = getattr(field, "options", None)
+    choices = getattr(options, "choices", None) if options else None
+    if not choices:
+        return [], []
+
+    names = {_choice_name(c) for c in choices}
+    if "Left" in names:
+        return [], []
+
+    updated: list[dict[str, Any]] = []
+    for choice in choices:
+        entry: dict[str, Any] = {"name": _choice_name(choice)}
+        cid = _choice_id(choice)
+        if cid:
+            entry["id"] = cid
+        updated.append(entry)
+    updated.append({"name": "Left", "color": "grayLight2"})
+
+    try:
+        url = str(
+            api.build_url(
+                "meta",
+                "bases",
+                base_id,
+                "tables",
+                api_table.id,
+                "fields",
+                field.id,
+            )
+        )
+        api.patch(url, json={"options": {"choices": updated}})
+        return ["added Status choice: Left"], []
+    except Exception as e:
+        logger.warning("Could not add Status choice Left: %s", e)
+        return [], [f"Status Left: could not add ({e})"]
+
+
 def migrate_airtable_schema(*, create_missing_tables: bool = True) -> dict[str, Any]:
     """
     Ensure Members, Finance/Payments, and Checklist tables exist with all fields.
@@ -255,6 +320,15 @@ def migrate_airtable_schema(*, create_missing_tables: bool = True) -> dict[str, 
 
         added, errors = _add_missing_fields(tbl, desired=desired, present=present)
         fixed: list[str] = []
+        if table_name == settings.airtable_members_table:
+            status_fixed, status_errors = _ensure_members_status_choices(
+                api,
+                base_id=settings.airtable_base_id,
+                api_table=tbl,
+                base_schema=base_schema,
+            )
+            fixed.extend(status_fixed)
+            errors.extend(status_errors)
         if table_name == settings.airtable_finance_table:
             type_fixed, type_errors = _fix_finance_field_types(
                 api,

@@ -565,3 +565,21 @@ async def cmd_sync(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         f"(`{dedupe.get('rows_before', 0)}` → `{dedupe.get('rows_after', 0)}` rows)"
     )
     await update.message.reply_text(body, parse_mode=ParseMode.MARKDOWN)
+
+
+@admin_only
+@log_call
+async def cmd_fix_onboarding_crm(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
+    """Backfill Onboarding Completed checkbox for all locally approved users."""
+    await update.message.reply_text(
+        "Syncing Onboarding Completed checkboxes to Airtable…"
+    )
+    dedupe = await airtable_sync.reconcile_members_table()
+    result = await airtable_sync.backfill_onboarding_completed_in_crm()
+    await update.message.reply_text(
+        "✅ *Onboarding CRM backfill complete*\n\n"
+        f"• Checkboxes updated: *{result.get('ok', 0)}*\n"
+        f"• Failed: *{result.get('failed', 0)}*\n"
+        f"• Duplicate groups merged: *{dedupe.get('groups_merged', 0)}*",
+        parse_mode=ParseMode.MARKDOWN,
+    )

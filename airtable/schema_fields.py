@@ -75,7 +75,7 @@ def members_fields() -> list[dict]:
         {"name": "Whop User ID", "type": "singleLineText"},
         {"name": "Whop Membership ID", "type": "singleLineText"},
         _select("Plan", ["Basic", "Premium", "VIP", "unknown"]),
-        _select("Status", ["Active", "Expired", "Banned", "Pending"]),
+        _select("Status", ["Active", "Expired", "Banned", "Pending", "Left"]),
         _date("Join Date"),
         _checkbox("Telegram Claimed"),
         _checkbox("Onboarding Completed"),

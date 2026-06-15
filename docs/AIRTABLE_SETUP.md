@@ -56,7 +56,7 @@ In Telegram (admin): `/airtable_setup` does the same — buyer does not need the
 | Whop User ID | Single line text | |
 | Whop Membership ID | Single line text | |
 | Plan | Single select | Options: Basic, Premium, VIP, unknown |
-| Status | Single select | Options: Active, Expired, Banned, Pending |
+| Status | Single select | Options: Active, Expired, Banned, Pending, **Left** (Telegram group leave; Whop subscription may still be active) |
 | Join Date | Date (include time) | Whop membership start |
 | Telegram Claimed | Checkbox | Checked after user runs `/claim` in Telegram |
 | Onboarding Completed | Checkbox | |
@@ -107,6 +107,7 @@ Set `AIRTABLE_FINANCE_TABLE=Payments` in `.env` (default). Legacy name `Finance`
 
 ### Members
 - **Active members** — Filter: `Status = Active`
+- **Left Telegram** — Filter: `Status = Left` (left the group; may still be paid on Whop)
 - **Not claimed yet** — Filter: `Telegram Claimed = false`
 - **Onboarding pending** — Filter: `Onboarding Completed = false`
 - **By platform** — Group by `Platform`
