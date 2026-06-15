@@ -69,5 +69,17 @@
     "first_name": "T",
     "last_name": "U",
     "updated_at": "2026-06-05T20:01:27.330576+00:00"
+  },
+  "1": {
+    "user_id": 1,
+    "joined_at": "2026-06-15T05:10:01.441007+00:00",
+    "status": "active",
+    "plan": "unknown",
+    "checklist": {},
+    "review_decision": "approved",
+    "review_decided_by_id": 99,
+    "review_decided_by_username": "john",
+    "review_decided_at": "2026-06-15T05:10:01.441007+00:00",
+    "updated_at": "2026-06-15T05:10:01.441007+00:00"
   }
 }

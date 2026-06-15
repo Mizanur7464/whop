@@ -684,6 +684,7 @@ async def on_screenshot_photo(
         return
 
     file_id = update.message.photo[-1].file_id
+    storage.clear_review_decision(user.id)
     storage.set_approval_status(
         user.id,
         storage.APPROVAL_PENDING_REVIEW,
@@ -810,17 +811,18 @@ async def _admin_approve(
         return
 
     if storage.get_approval_status(target_user_id) != storage.APPROVAL_PENDING_REVIEW:
-        await safe_send_message(
-            context.bot,
-            admin.id,
-            "This user is not awaiting review.",
-            parse_mode=None,
-        )
+        await _notify_review_already_decided(context, admin.id, target_user_id)
         return
 
     await _strip_review_buttons(query)
 
     storage.set_approval_status(target_user_id, storage.APPROVAL_APPROVED)
+    storage.record_review_decision(
+        target_user_id,
+        storage.REVIEW_DECISION_APPROVED,
+        admin_id=admin.id,
+        admin_username=admin.username,
+    )
     storage.mark_onboarding_completed(target_user_id)
     storage.clear_membership_inactive(target_user_id)
     jobs.cancel_user_reminders(context.application, target_user_id)
@@ -848,17 +850,18 @@ async def _admin_reject(
         return
 
     if storage.get_approval_status(target_user_id) != storage.APPROVAL_PENDING_REVIEW:
-        await safe_send_message(
-            context.bot,
-            admin.id,
-            "This user is not awaiting review.",
-            parse_mode=None,
-        )
+        await _notify_review_already_decided(context, admin.id, target_user_id)
         return
 
     await _strip_review_buttons(query)
 
     storage.set_approval_status(target_user_id, storage.APPROVAL_AWAITING_SCREENSHOT)
+    storage.record_review_decision(
+        target_user_id,
+        storage.REVIEW_DECISION_REJECTED,
+        admin_id=admin.id,
+        admin_username=admin.username,
+    )
     local_user = storage.get_user(target_user_id) or {}
     reason = (
         "The screenshot wasn't clear enough or didn't show a linked trading account."
@@ -1028,6 +1031,19 @@ def _all_admin_ids() -> list[int]:
 
 def _is_review_admin(user_id: int) -> bool:
     return user_id in _review_admin_ids()
+
+
+async def _notify_review_already_decided(
+    context: ContextTypes.DEFAULT_TYPE,
+    admin_id: int,
+    target_user_id: int,
+) -> None:
+    await safe_send_message(
+        context.bot,
+        admin_id,
+        storage.format_review_decision_notice(target_user_id),
+        parse_mode=None,
+    )
 
 
 def _admin_actor_label(actor) -> str:

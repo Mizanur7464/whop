@@ -289,6 +289,10 @@ def reset_onboarding_progress(user_id: int) -> dict:
         checklist={},
         membership_inactive=False,
         membership_inactive_reason=None,
+        review_decision=None,
+        review_decided_by_id=None,
+        review_decided_by_username=None,
+        review_decided_at=None,
     )
 
 
@@ -305,6 +309,10 @@ def mark_membership_inactive(user_id: int, *, reason: str) -> dict:
         terms_accepted=False,
         terms_accepted_at=None,
         screenshot_file_id=None,
+        review_decision=None,
+        review_decided_by_id=None,
+        review_decided_by_username=None,
+        review_decided_at=None,
     )
 
 
@@ -324,6 +332,9 @@ APPROVAL_PENDING_REVIEW = "pending_review"
 APPROVAL_APPROVED = "approved"
 APPROVAL_REJECTED = "rejected"
 
+REVIEW_DECISION_APPROVED = "approved"
+REVIEW_DECISION_REJECTED = "rejected"
+
 
 def get_approval_status(user_id: int) -> str:
     user = get_user(user_id)
@@ -340,6 +351,65 @@ def is_awaiting_screenshot(user_id: int) -> bool:
 
 def is_pending_review(user_id: int) -> bool:
     return get_approval_status(user_id) == APPROVAL_PENDING_REVIEW
+
+
+def record_review_decision(
+    user_id: int,
+    decision: str,
+    *,
+    admin_id: int,
+    admin_username: str | None = None,
+) -> dict:
+    return upsert_user(
+        user_id,
+        review_decision=decision,
+        review_decided_by_id=admin_id,
+        review_decided_by_username=admin_username,
+        review_decided_at=datetime.now(timezone.utc).isoformat(),
+    )
+
+
+def clear_review_decision(user_id: int) -> dict:
+    return upsert_user(
+        user_id,
+        review_decision=None,
+        review_decided_by_id=None,
+        review_decided_by_username=None,
+        review_decided_at=None,
+    )
+
+
+def format_review_decision_notice(user_id: int) -> str:
+    """Message when an admin taps Approve/Reject on a stale review alert."""
+    user = get_user(user_id) or {}
+    decision = user.get("review_decision")
+    who = user.get("review_decided_by_username")
+    if who:
+        who_label = f"@{who}"
+    elif user.get("review_decided_by_id"):
+        who_label = str(user["review_decided_by_id"])
+    else:
+        who_label = "another admin"
+
+    if decision == REVIEW_DECISION_APPROVED:
+        return (
+            f"✅ This member was already approved by {who_label}. "
+            "No further action is needed."
+        )
+    if decision == REVIEW_DECISION_REJECTED:
+        return (
+            f"❌ This member was already rejected by {who_label}. "
+            "They can submit a new screenshot via /onboarding."
+        )
+    if get_approval_status(user_id) == APPROVAL_APPROVED:
+        return (
+            "✅ This member has already been approved. "
+            "No further action is needed."
+        )
+    return (
+        "This member is no longer awaiting review — "
+        "a decision has already been recorded."
+    )
 
 
 def increment_reminders_sent(user_id: int) -> int:
