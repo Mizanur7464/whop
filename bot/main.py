@@ -230,8 +230,8 @@ def build_app() -> Application:
             group=-1,
         )
         logger.info(
-            f"Group moderation ON for welcome group {settings.telegram_welcome_group_id} "
-            "(Welcome + Notifications: admin-only)"
+            f"Group moderation ON for welcome group {settings.telegram_welcome_group_id}\n"
+            f"{group_moderation.moderation_summary()}"
         )
     app.add_handler(
         CallbackQueryHandler(leave_survey.on_leave_callback, pattern=r"^lv:")

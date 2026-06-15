@@ -72,10 +72,17 @@ def onboarding_contact_active(_: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     return context.user_data.get(CONTACT_STEP_KEY) in (
         "first_name",
         "last_name",
-        "email",
-        "phone",
         "platform_user_id",
     )
+
+
+def _contact_email(record: dict) -> str | None:
+    """Email from Whop claim/checkout — not asked again during onboarding."""
+    for key in ("contact_email", "checkout_email"):
+        value = (record.get(key) or "").strip()
+        if value and "@" in value:
+            return value
+    return None
 
 
 def _contact_full_name(record: dict) -> str | None:
@@ -467,14 +474,12 @@ async def accept_terms(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 async def show_contact_intro(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> None:
-    """Collect email, phone, and confirm Telegram ID before T&C."""
+    """Collect name and platform user ID before T&C (email comes from Whop claim)."""
     user = update.effective_user
     set_onboarding_step(context, user.id, "contact")
     record = storage.get_user(user.id) or {}
     if (
         _contact_names_complete(record)
-        and record.get("contact_email")
-        and record.get("contact_phone")
         and record.get("platform_user_id")
     ):
         await show_terms(update, context)
@@ -553,35 +558,6 @@ async def on_onboarding_contact_text(
             contact_telegram_id=user.id,
             telegram_username=user.username,
         )
-        context.user_data[CONTACT_STEP_KEY] = "email"
-        await safe_reply_text(
-            update.message, cfg.contact_email_prompt, parse_mode=ParseMode.MARKDOWN
-        )
-        return
-
-    if step == "email":
-        if "@" not in text or len(text) < 5:
-            await update.message.reply_text("Please send a valid email address.")
-            return
-        storage.upsert_user(
-            user.id,
-            contact_email=text,
-            contact_telegram_id=user.id,
-            telegram_username=user.username,
-        )
-        context.user_data[CONTACT_STEP_KEY] = "phone"
-        await safe_reply_text(
-            update.message, cfg.contact_phone_prompt, parse_mode=ParseMode.MARKDOWN
-        )
-        return
-
-    if step == "phone":
-        storage.upsert_user(
-            user.id,
-            contact_phone=text,
-            contact_telegram_id=user.id,
-            telegram_username=user.username,
-        )
         context.user_data[CONTACT_STEP_KEY] = "platform_user_id"
         platform = (storage.get_user(user.id) or {}).get("platform") or "your platform"
         prompt = _msg(
@@ -606,8 +582,8 @@ async def on_onboarding_contact_text(
             telegram_user_id=user.id,
             telegram_username=user.username,
             name=_contact_full_name(record) or user.full_name,
-            email=record.get("contact_email", ""),
-            phone=record.get("contact_phone", ""),
+            email=_contact_email(record) or "",
+            phone=record.get("contact_phone") or "",
             platform=record.get("platform"),
             platform_user_id=text,
         )
@@ -1154,7 +1130,7 @@ def _review_caption_html(user, record: dict) -> str:
     platform = html.escape(str(record.get("platform", "—")))
     platform_user_id = html.escape(str(record.get("platform_user_id", "—")))
     phone = html.escape(str(record.get("contact_phone", "—")))
-    email = html.escape(str(record.get("contact_email", "—")))
+    email = html.escape(str(_contact_email(record) or record.get("contact_email") or "—"))
     terms_at = html.escape(str(record.get("terms_accepted_at", "—")))
     return (
         "<b>📸 Onboarding screenshot — review required</b>\n\n"

@@ -27,8 +27,6 @@ STEP_LABELS: dict[str, str] = {
     "contact": "Contact details",
     "contact_first_name": "Contact — first name",
     "contact_last_name": "Contact — last name",
-    "contact_email": "Contact — email",
-    "contact_phone": "Contact — phone",
     "contact_platform_id": "Contact — platform user ID",
     "terms": "Terms & Conditions",
     "terms_accept": "Terms accept",

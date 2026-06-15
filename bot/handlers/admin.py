@@ -186,22 +186,62 @@ async def cmd_topicid(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if not msg or not chat:
         return
     thread = msg.message_thread_id
-    topic_lines = [
-        ("TELEGRAM_TOPIC_WELCOME", "Welcome"),
-        ("TELEGRAM_TOPIC_COPYTRADING", "Copy Trading (admin-only)"),
-        ("TELEGRAM_TOPIC_SUPPORT", "Support (admin-only)"),
-        ("TELEGRAM_TOPIC_SIGNALS", "Signals (admin-only)"),
-        ("TELEGRAM_TOPIC_EDUCATION", "Members Community (members chat OK)"),
-        ("TELEGRAM_TOPIC_NOTIFICATIONS", "Daily Notifications"),
-        ("TELEGRAM_TOPIC_PNL", "PnL (optional)"),
-    ]
+    chat_id = chat.id
+    is_welcome = chat_id == settings.telegram_welcome_group_id
+    is_main = chat_id == settings.telegram_main_group_id
+
+    if is_welcome:
+        group_name = "Welcome group (Fusion Strategy Members entry)"
+        topic_lines = [
+            (
+                "TELEGRAM_WELCOME_GROUP_TOPIC_MEMBERS_COMMUNITY",
+                "Members Community (members chat OK, no links)",
+            ),
+            (
+                "TELEGRAM_WELCOME_GROUP_TOPIC_SIGNUP_SUPPORT",
+                "Sign Up Support (members chat OK, no links)",
+            ),
+            (
+                "TELEGRAM_WELCOME_GROUP_TOPIC_SIGNUP_INSTRUCTIONS",
+                "Sign Up Instructions (admin-only)",
+            ),
+            ("TELEGRAM_WELCOME_GROUP_TOPIC_RESULTS", "Results (admin-only)"),
+            ("TELEGRAM_WELCOME_GROUP_TOPIC_FEEDBACK", "Feedback (admin-only)"),
+            ("TELEGRAM_WELCOME_GROUP_TOPIC_WELCOME", "Welcome (admin-only)"),
+            (
+                "TELEGRAM_WELCOME_GROUP_TOPIC_NOTIFICATIONS",
+                "Notifications (admin-only)",
+            ),
+        ]
+        group_env = f"TELEGRAM_WELCOME_GROUP_ID=<code>{chat_id}</code>"
+    elif is_main:
+        group_name = "Main community group"
+        topic_lines = [
+            ("TELEGRAM_TOPIC_TRADING_TALKS", "Trading Talks (admin-only)"),
+            ("TELEGRAM_TOPIC_SIGNALS", "Signals (admin-only)"),
+            ("TELEGRAM_TOPIC_COPYTRADING", "Copy Trading (admin-only)"),
+            ("TELEGRAM_TOPIC_SUPPORT", "Support (admin-only)"),
+            ("TELEGRAM_TOPIC_NOTIFICATIONS", "Daily Notifications (admin-only)"),
+            ("TELEGRAM_TOPIC_PNL", "PnL (optional, admin-only)"),
+            (
+                "TELEGRAM_TOPIC_EDUCATION",
+                "Legacy — do not use for member chat (moved to welcome group)",
+            ),
+        ]
+        group_env = f"TELEGRAM_MAIN_GROUP_ID=<code>{chat_id}</code>"
+    else:
+        group_name = "This group"
+        topic_lines = [
+            ("TELEGRAM_MAIN_GROUP_ID or TELEGRAM_WELCOME_GROUP_ID", "Set chat id first"),
+        ]
+        group_env = f"Chat ID: <code>{chat_id}</code>"
     if thread:
         keys_block = "\n".join(
             f"<code>{key}=</code>  <i>{label}</i>" for key, label in topic_lines
         )
         topic_block = (
             f"<b>This topic ID:</b> <code>{thread}</code>\n"
-            f"Example: <code>TELEGRAM_TOPIC_NOTIFICATIONS={thread}</code>"
+            f"Example: <code>{topic_lines[0][0]}={thread}</code>"
         )
     else:
         keys_block = "\n".join(
@@ -214,8 +254,8 @@ async def cmd_topicid(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     mod_block = group_moderation.moderation_summary().replace("\n", "\n• ")
     await update.message.reply_text(
-        "📌 <b>IDs for .env</b>\n\n"
-        f"TELEGRAM_MAIN_GROUP_ID=<code>{chat.id}</code>\n\n"
+        f"📌 <b>IDs for .env — {group_name}</b>\n\n"
+        f"{group_env}\n\n"
         f"{topic_block}\n\n"
         "<b>Topic keys (pick one per topic):</b>\n"
         f"{keys_block}\n\n"
@@ -229,17 +269,38 @@ async def cmd_topicid(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 async def cmd_create_members_topic(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> None:
-    """Create a new Members Community forum topic in the main group."""
+    """Create a forum topic in the welcome group (default: Members Community)."""
     if not await _can_run_topicid(update, context):
         await update.message.reply_text(texts.UNAUTHORIZED)
         return
 
-    gid = settings.telegram_main_group_id
+    gid = settings.telegram_welcome_group_id
+    env_key = "TELEGRAM_WELCOME_GROUP_TOPIC_MEMBERS_COMMUNITY"
     if not gid:
-        await update.message.reply_text("Set TELEGRAM_MAIN_GROUP_ID in .env first.")
+        await update.message.reply_text(
+            "Set TELEGRAM_WELCOME_GROUP_ID in .env first."
+        )
         return
 
     name = " ".join(context.args).strip() if context.args else "Members Community"
+    name_lower = name.lower()
+    if "sign up support" in name_lower or name_lower == "signup support":
+        env_key = "TELEGRAM_WELCOME_GROUP_TOPIC_SIGNUP_SUPPORT"
+    elif "sign up instructions" in name_lower or name_lower == "signup instructions":
+        env_key = "TELEGRAM_WELCOME_GROUP_TOPIC_SIGNUP_INSTRUCTIONS"
+    elif name_lower == "results":
+        env_key = "TELEGRAM_WELCOME_GROUP_TOPIC_RESULTS"
+    elif name_lower == "feedback":
+        env_key = "TELEGRAM_WELCOME_GROUP_TOPIC_FEEDBACK"
+    elif "trading talks" in name_lower:
+        gid = settings.telegram_main_group_id
+        env_key = "TELEGRAM_TOPIC_TRADING_TALKS"
+        if not gid:
+            await update.message.reply_text(
+                "Set TELEGRAM_MAIN_GROUP_ID in .env for Trading Talks."
+            )
+            return
+
     try:
         topic = await context.bot.create_forum_topic(chat_id=gid, name=name)
     except Exception as e:
@@ -253,8 +314,8 @@ async def cmd_create_members_topic(
     await update.message.reply_text(
         f"✅ Created forum topic <b>{name}</b>\n\n"
         f"Set in Railway:\n"
-        f"<code>TELEGRAM_TOPIC_EDUCATION={thread_id}</code>\n\n"
-        "Then redeploy. Members can chat in this topic only.",
+        f"<code>{env_key}={thread_id}</code>\n\n"
+        "Then redeploy the bot.",
         parse_mode=ParseMode.HTML,
     )
 

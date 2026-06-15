@@ -1,59 +1,75 @@
-# Community setup — one group + topics
+# Community setup — two groups + forum topics
 
-## 1. `.env` values
+## Layout overview
+
+| Group | Purpose |
+|-------|---------|
+| **Welcome group** (`TELEGRAM_WELCOME_GROUP_ID`) | Entry group — Whop link, member chat in Members Community + Sign Up Support |
+| **Main group** (`TELEGRAM_MAIN_GROUP_ID`) | Full community — all topics admin-only for members (Signals, Trading Talks, etc.) |
+
+Rename the welcome supergroup in Telegram to **Fusion Strategy Members** (manual in Telegram settings).
+
+## 1. Welcome group `.env`
+
+```env
+TELEGRAM_WELCOME_GROUP_ID=-1001234567890
+TELEGRAM_WELCOME_GROUP_TOPIC_WELCOME=2
+TELEGRAM_WELCOME_GROUP_TOPIC_NOTIFICATIONS=4
+TELEGRAM_WELCOME_GROUP_TOPIC_MEMBERS_COMMUNITY=10
+TELEGRAM_WELCOME_GROUP_TOPIC_SIGNUP_SUPPORT=11
+TELEGRAM_WELCOME_GROUP_TOPIC_SIGNUP_INSTRUCTIONS=12
+TELEGRAM_WELCOME_GROUP_TOPIC_RESULTS=13
+TELEGRAM_WELCOME_GROUP_TOPIC_FEEDBACK=14
+```
+
+## 2. Main group `.env`
 
 ```env
 TELEGRAM_COMMUNITY_LAYOUT=topics
-TELEGRAM_MAIN_GROUP_ID=-1001234567890
-TELEGRAM_TOPIC_WELCOME=2
-TELEGRAM_TOPIC_COPYTRADING=5
-TELEGRAM_TOPIC_SUPPORT=9
+TELEGRAM_MAIN_GROUP_ID=-1009876543210
+TELEGRAM_TOPIC_TRADING_TALKS=20
+TELEGRAM_TOPIC_SIGNALS=5
+TELEGRAM_TOPIC_COPYTRADING=6
+TELEGRAM_TOPIC_SUPPORT=7
 TELEGRAM_TOPIC_NOTIFICATIONS=4
 TELEGRAM_TOPIC_PNL=
+# Legacy — leave empty; Members Community moved to welcome group
+TELEGRAM_TOPIC_EDUCATION=
 ```
-
-Optional: `TELEGRAM_TOPIC_PNL` only if you have a dedicated PnL topic (not the same as notifications).
 
 Restart the bot after saving.
 
-## 2. Get `TELEGRAM_MAIN_GROUP_ID`
+## 3. Get topic IDs
 
-1. Add `@RawDataBot` or `@getidsbot` to the group (or use Telegram Web).
-2. Forward any message from the group → bot replies with chat id (starts with `-100`).
-
-Or: add your bot, send a message in the group, check bot logs / `getUpdates`.
-
-## 3. Get topic IDs (`message_thread_id`)
-
-**Easy way:**
-
-1. Open the topic (e.g. “Welcome”) in Telegram.
+1. Open the topic in Telegram.
 2. Send any message in that topic.
-3. While the bot is running, read `logs/bot_*.log` or temporarily log `update.message.message_thread_id`.
+3. Run `/topicid` in that topic (admin only).
+4. Copy the `message_thread_id` into the matching `.env` key.
 
-**Or** use @RawDataBot on a message **inside** the topic — look for `message_thread_id`.
+Or use `/create_members_topic Sign Up Support` in the welcome group to create a topic and get the env line.
 
-General topic (main chat) often has no thread id or `0` — use a dedicated Welcome topic instead.
+## 4. Bot moderation (automatic)
 
-## 4. Private DM only (member flows)
+- **Main group:** deletes all non-admin member messages.
+- **Welcome group:** allows member chat only in Members Community + Sign Up Support.
+- **Link ban:** deletes messages with URLs/links in member-chat welcome topics.
+- Bot must be group admin with **Delete messages**.
 
-Member flows **do not run inside group topics** (avoids public chat history).
+Optional overrides:
 
-| Topic | What to pin |
-|-------|-------------|
-| Welcome | “Tap Open bot → complete onboarding in private chat” |
-| Copy Trading | “Open bot → /copytrading in DM” |
-| Support | “Open bot → /support in DM” |
+```env
+GROUP_MODERATION_WELCOME_MEMBER_CHAT_TOPICS=10,11
+GROUP_MODERATION_NO_LINKS_TOPICS=10,11
+```
 
-If a member types `/start` in a topic, the bot replies with an **Open bot** button.
+## 5. Private DM onboarding
 
-Admins can still use `/topicid` in the group.
+Member flows run in private chat with the bot — not inside group topics.
 
-## 5. After approval
+Pin in **Sign Up Instructions**: “Open bot → /onboarding”.
 
-Bot DMs the member:
+Pin in **Feedback**: Airtable feedback form link.
 
-- One invite link to the **main group** (if not already inside)
-- List of topics to open
+## 6. After approval
 
-Topic permissions (who sees which thread) are set in Telegram group settings — not by this bot.
+Bot DMs the member a main group invite link. Topic permissions inside Telegram are set by admins — the bot enforces delete rules only.

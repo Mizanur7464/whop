@@ -52,6 +52,21 @@ class Settings(BaseSettings):
     telegram_welcome_group_topic_notifications: Optional[int] = Field(
         default=None, alias="TELEGRAM_WELCOME_GROUP_TOPIC_NOTIFICATIONS"
     )
+    telegram_welcome_group_topic_members_community: Optional[int] = Field(
+        default=None, alias="TELEGRAM_WELCOME_GROUP_TOPIC_MEMBERS_COMMUNITY"
+    )
+    telegram_welcome_group_topic_signup_support: Optional[int] = Field(
+        default=None, alias="TELEGRAM_WELCOME_GROUP_TOPIC_SIGNUP_SUPPORT"
+    )
+    telegram_welcome_group_topic_signup_instructions: Optional[int] = Field(
+        default=None, alias="TELEGRAM_WELCOME_GROUP_TOPIC_SIGNUP_INSTRUCTIONS"
+    )
+    telegram_welcome_group_topic_results: Optional[int] = Field(
+        default=None, alias="TELEGRAM_WELCOME_GROUP_TOPIC_RESULTS"
+    )
+    telegram_welcome_group_topic_feedback: Optional[int] = Field(
+        default=None, alias="TELEGRAM_WELCOME_GROUP_TOPIC_FEEDBACK"
+    )
     # Forum topic IDs (message_thread_id) inside TELEGRAM_MAIN_GROUP_ID
     telegram_topic_welcome: Optional[int] = Field(
         default=None, alias="TELEGRAM_TOPIC_WELCOME"
@@ -70,6 +85,9 @@ class Settings(BaseSettings):
     )
     telegram_topic_education: Optional[int] = Field(
         default=None, alias="TELEGRAM_TOPIC_EDUCATION"
+    )
+    telegram_topic_trading_talks: Optional[int] = Field(
+        default=None, alias="TELEGRAM_TOPIC_TRADING_TALKS"
     )
     telegram_topic_pnl: Optional[int] = Field(
         default=None, alias="TELEGRAM_TOPIC_PNL"
@@ -123,7 +141,16 @@ class Settings(BaseSettings):
     group_moderation_enabled: bool = Field(
         default=True, alias="GROUP_MODERATION_DELETE_MEMBER_MESSAGES"
     )
-    # Comma-separated forum topic IDs where members may chat (default: education topic).
+    group_moderation_welcome_member_chat_topics_csv: str = Field(
+        default="", alias="GROUP_MODERATION_WELCOME_MEMBER_CHAT_TOPICS"
+    )
+    group_moderation_no_links_topics_csv: str = Field(
+        default="", alias="GROUP_MODERATION_NO_LINKS_TOPICS"
+    )
+    group_moderation_main_admin_only_topics_csv: str = Field(
+        default="", alias="GROUP_MODERATION_MAIN_ADMIN_ONLY_TOPICS"
+    )
+    # Legacy — member chat moved to welcome group; optional override for main group.
     group_moderation_member_chat_topics_csv: str = Field(
         default="", alias="GROUP_MODERATION_MEMBER_CHAT_TOPICS"
     )
@@ -152,6 +179,11 @@ class Settings(BaseSettings):
         "telegram_welcome_group_id",
         "telegram_welcome_group_topic_welcome",
         "telegram_welcome_group_topic_notifications",
+        "telegram_welcome_group_topic_members_community",
+        "telegram_welcome_group_topic_signup_support",
+        "telegram_welcome_group_topic_signup_instructions",
+        "telegram_welcome_group_topic_results",
+        "telegram_welcome_group_topic_feedback",
         "telegram_vip_group_id",
         "telegram_announcement_channel_id",
         "welcome_channel_id",
@@ -167,6 +199,7 @@ class Settings(BaseSettings):
         "telegram_topic_support",
         "telegram_topic_signals",
         "telegram_topic_education",
+        "telegram_topic_trading_talks",
         "telegram_topic_pnl",
         "telegram_topic_notifications",
         mode="before",

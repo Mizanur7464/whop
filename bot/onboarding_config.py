@@ -57,12 +57,10 @@ class OnboardingConfig(BaseModel):
     contact_full_name_prompt: str = (
         "Please reply with your *first name* in your next message."
     )
-    contact_email_prompt: str = (
-        "Thank you. Now please reply with your *email address* in your next message."
-    )
-    contact_phone_prompt: str = (
-        "Thank you. Now please reply with your phone number (include country code)."
-    )
+    # Legacy — email is collected at Whop claim; no longer asked in onboarding.
+    contact_email_prompt: str = ""
+    # Legacy — phone is no longer collected in onboarding.
+    contact_phone_prompt: str = ""
     contact_platform_user_id_prompt: str = (
         "Thank you. Now please reply with your *{platform} platform user ID* "
         "(the username or account ID you use on that trading platform)."

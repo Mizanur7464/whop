@@ -27,6 +27,12 @@ FLOW_SIGNALS = "signals"
 FLOW_EDUCATION = "education"
 FLOW_PNL = "pnl"
 FLOW_NOTIFICATIONS = "notifications"
+FLOW_TRADING_TALKS = "trading_talks"
+FLOW_MEMBERS_COMMUNITY = "members_community"
+FLOW_SIGNUP_SUPPORT = "signup_support"
+FLOW_SIGNUP_INSTRUCTIONS = "signup_instructions"
+FLOW_RESULTS = "results"
+FLOW_FEEDBACK = "feedback"
 
 _FLOW_TOPIC_ATTR = {
     FLOW_WELCOME: "telegram_topic_welcome",
@@ -36,6 +42,17 @@ _FLOW_TOPIC_ATTR = {
     FLOW_EDUCATION: "telegram_topic_education",
     FLOW_PNL: "telegram_topic_pnl",
     FLOW_NOTIFICATIONS: "telegram_topic_notifications",
+    FLOW_TRADING_TALKS: "telegram_topic_trading_talks",
+}
+
+_WELCOME_GROUP_TOPIC_ATTR = {
+    FLOW_MEMBERS_COMMUNITY: "telegram_welcome_group_topic_members_community",
+    FLOW_SIGNUP_SUPPORT: "telegram_welcome_group_topic_signup_support",
+    FLOW_SIGNUP_INSTRUCTIONS: "telegram_welcome_group_topic_signup_instructions",
+    FLOW_RESULTS: "telegram_welcome_group_topic_results",
+    FLOW_FEEDBACK: "telegram_welcome_group_topic_feedback",
+    FLOW_WELCOME: "telegram_welcome_group_topic_welcome",
+    FLOW_NOTIFICATIONS: "telegram_welcome_group_topic_notifications",
 }
 
 _FLOW_CHANNEL_ATTR = {
@@ -52,9 +69,15 @@ _FLOW_LABEL = {
     FLOW_COPYTRADING: "Copy Trading",
     FLOW_SUPPORT: "Support",
     FLOW_SIGNALS: "Signals",
-    FLOW_EDUCATION: "Members Community",
+    FLOW_EDUCATION: "Members Community (legacy main topic)",
     FLOW_PNL: "PnL",
     FLOW_NOTIFICATIONS: "Daily Notifications",
+    FLOW_TRADING_TALKS: "Trading Talks",
+    FLOW_MEMBERS_COMMUNITY: "Members Community",
+    FLOW_SIGNUP_SUPPORT: "Sign Up Support",
+    FLOW_SIGNUP_INSTRUCTIONS: "Sign Up Instructions",
+    FLOW_RESULTS: "Results",
+    FLOW_FEEDBACK: "Feedback",
 }
 
 
@@ -72,7 +95,7 @@ def main_group_id() -> int | None:
 
 
 def topic_id_for(flow: str) -> int | None:
-    attr = _FLOW_TOPIC_ATTR.get(flow)
+    attr = _FLOW_TOPIC_ATTR.get(flow) or _WELCOME_GROUP_TOPIC_ATTR.get(flow)
     if not attr:
         return None
     return getattr(settings, attr, None)
@@ -129,11 +152,13 @@ def unlock_topic_flows() -> list[str]:
         f
         for f in (
             FLOW_SIGNALS,
-            FLOW_EDUCATION,
+            FLOW_TRADING_TALKS,
             FLOW_NOTIFICATIONS,
             FLOW_PNL,
             FLOW_COPYTRADING,
             FLOW_SUPPORT,
+            FLOW_MEMBERS_COMMUNITY,
+            FLOW_SIGNUP_SUPPORT,
         )
         if topic_id_for(f) is not None or channel_id_for(f) is not None
     ]
