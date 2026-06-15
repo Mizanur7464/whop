@@ -324,6 +324,42 @@ def clear_membership_inactive(user_id: int) -> dict:
     )
 
 
+def should_reset_onboarding_on_rejoin(
+    user_id: int, new_membership_id: str | None
+) -> bool:
+    """True when a returning Whop member must run onboarding again."""
+    user = get_user(user_id) or {}
+    if not user.get("whop_user_id"):
+        return False
+    if user.get("membership_inactive"):
+        return True
+    if (user.get("status") or "").lower() in ("expired", "left"):
+        return True
+    old_mid = (user.get("whop_membership_id") or "").strip()
+    new_mid = (new_membership_id or "").strip()
+    if old_mid and new_mid and old_mid != new_mid:
+        return True
+    return False
+
+
+def prepare_membership_rejoin(
+    user_id: int,
+    *,
+    whop_user_id: str,
+    whop_membership_id: str,
+    plan: str | None = None,
+) -> dict:
+    """Reset onboarding for a Whop rejoin; keep Whop link and contact details."""
+    reset_onboarding_progress(user_id)
+    return upsert_user(
+        user_id,
+        whop_user_id=whop_user_id,
+        whop_membership_id=whop_membership_id,
+        plan=plan,
+        status="active",
+    )
+
+
 # ---------- Manual approval (screenshot review) ----------
 
 APPROVAL_NONE = ""

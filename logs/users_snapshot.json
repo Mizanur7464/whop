@@ -81,5 +81,27 @@
     "review_decided_by_username": "john",
     "review_decided_at": "2026-06-15T05:10:01.441007+00:00",
     "updated_at": "2026-06-15T05:10:01.441007+00:00"
+  },
+  "123": {
+    "user_id": 123,
+    "joined_at": "2026-06-15T09:12:02.787969+00:00",
+    "status": "active",
+    "plan": "Free",
+    "checklist": {},
+    "whop_user_id": "w1",
+    "whop_membership_id": "m2",
+    "approval_status": "",
+    "updated_at": "2026-06-15T09:12:02.790470+00:00",
+    "membership_inactive": false,
+    "membership_inactive_reason": null,
+    "onboarding_completed": false,
+    "onboarding_completed_at": null,
+    "terms_accepted": false,
+    "terms_accepted_at": null,
+    "screenshot_file_id": null,
+    "review_decision": null,
+    "review_decided_by_id": null,
+    "review_decided_by_username": null,
+    "review_decided_at": null
   }
 }

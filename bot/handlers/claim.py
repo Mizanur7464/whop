@@ -85,6 +85,12 @@ async def reply_if_already_linked(
         return False
     if not storage.has_whop_link(telegram_user_id):
         return False
+    record = storage.get_user(telegram_user_id) or {}
+    if record.get("membership_inactive") or (record.get("status") or "").lower() in (
+        "expired",
+        "left",
+    ):
+        return False
     if not update.message:
         return True
     context.user_data.pop(USER_DATA_AWAITING_WHOP_EMAIL, None)
@@ -144,25 +150,44 @@ async def fulfill_claim(
         product_id, claim.get("product_name") or claim.get("plan")
     )
     checkout_email = (claim.get("email") or "").strip().lower() or None
+    rejoin = storage.should_reset_onboarding_on_rejoin(
+        telegram_user_id, claim["whop_membership_id"]
+    )
 
     storage.clear_awaiting_claim_email(telegram_user_id)
-    storage.link_whop_user(
-        telegram_user_id,
-        whop_user_id,
-        whop_membership_id=claim["whop_membership_id"],
-        plan=plan_name,
-        status="active",
-        username=username or "",
-        first_name=first_name or "",
-        last_name=last_name or "",
-        checkout_email=checkout_email,
-        contact_email=checkout_email,
-    )
+    if rejoin:
+        storage.prepare_membership_rejoin(
+            telegram_user_id,
+            whop_user_id=whop_user_id,
+            whop_membership_id=claim["whop_membership_id"],
+            plan=plan_name,
+        )
+        storage.upsert_user(
+            telegram_user_id,
+            username=username or "",
+            first_name=first_name or "",
+            last_name=last_name or "",
+            checkout_email=checkout_email,
+            contact_email=checkout_email,
+        )
+    else:
+        storage.link_whop_user(
+            telegram_user_id,
+            whop_user_id,
+            whop_membership_id=claim["whop_membership_id"],
+            plan=plan_name,
+            status="active",
+            username=username or "",
+            first_name=first_name or "",
+            last_name=last_name or "",
+            checkout_email=checkout_email,
+            contact_email=checkout_email,
+        )
 
     logger.info(
         f"Claim {code} linked tg={telegram_user_id} (@{username}) "
         f"-> whop={whop_user_id} membership={claim['whop_membership_id']} "
-        f"(main group invite deferred until onboarding approval)"
+        f"rejoin={rejoin} (main group invite deferred until onboarding approval)"
     )
 
     # Main group invite is sent after admin approves onboarding (unlock_for_user).
@@ -176,15 +201,27 @@ async def fulfill_claim(
 
     async def _deferred_sync() -> None:
         try:
-            await airtable_sync.member_joined(
-                telegram_user_id=telegram_user_id,
-                telegram_username=username,
-                name=" ".join(p for p in [first_name, last_name] if p) or None,
-                whop_user_id=whop_user_id,
-                whop_membership_id=claim["whop_membership_id"],
-                plan=plan_name,
-                email=checkout_email,
-            )
+            sync_name = " ".join(p for p in [first_name, last_name] if p) or None
+            if rejoin:
+                await airtable_sync.member_rejoined(
+                    telegram_user_id=telegram_user_id,
+                    telegram_username=username,
+                    name=sync_name,
+                    whop_user_id=whop_user_id,
+                    whop_membership_id=claim["whop_membership_id"],
+                    plan=plan_name,
+                    email=checkout_email,
+                )
+            else:
+                await airtable_sync.member_joined(
+                    telegram_user_id=telegram_user_id,
+                    telegram_username=username,
+                    name=sync_name,
+                    whop_user_id=whop_user_id,
+                    whop_membership_id=claim["whop_membership_id"],
+                    plan=plan_name,
+                    email=checkout_email,
+                )
         except Exception as e:
             logger.warning(
                 f"fulfill_claim: Airtable sync failed for tg={telegram_user_id}: {e}"

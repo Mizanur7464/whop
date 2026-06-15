@@ -94,6 +94,38 @@ async def member_joined(
         logger.warning(f"Airtable member_joined failed: {e}")
 
 
+async def member_rejoined(
+    *,
+    telegram_user_id: int,
+    telegram_username: str | None,
+    name: str | None,
+    whop_user_id: str | None,
+    whop_membership_id: str | None,
+    plan: str | None,
+    email: str | None = None,
+) -> None:
+    """Returning member after Whop cancel — reset CRM onboarding, Status=Pending."""
+    c = client()
+    if not c.enabled:
+        return
+    try:
+        await c.reactivate_member_for_onboarding(
+            telegram_user_id=telegram_user_id,
+            whop_user_id=whop_user_id,
+            whop_membership_id=whop_membership_id,
+            plan=plan,
+            email=email,
+            name=name,
+            telegram_username=telegram_username,
+        )
+        logger.info(
+            f"Airtable: member_rejoined tg={telegram_user_id} plan={plan} "
+            f"membership={whop_membership_id!r}"
+        )
+    except Exception as e:
+        logger.warning(f"Airtable member_rejoined failed: {e}")
+
+
 async def sync_whop_membership(
     *,
     whop_user_id: str,
@@ -139,10 +171,21 @@ async def whop_membership_ended(whop_user_id: str) -> None:
     if not c.enabled:
         return
     try:
-        await c.upsert_whop_member(
-            whop_user_id=whop_user_id,
-            status=MemberStatus.EXPIRED,
-        )
+        tg_id = None
+        from bot import storage
+
+        tg_id = storage.get_telegram_id_for_whop_user(whop_user_id)
+        if tg_id is not None:
+            await c._set_member_status_with_onboarding_reset(
+                telegram_user_id=tg_id,
+                whop_user_id=whop_user_id,
+                status=MemberStatus.EXPIRED,
+            )
+        else:
+            await c._set_member_status_with_onboarding_reset(
+                whop_user_id=whop_user_id,
+                status=MemberStatus.EXPIRED,
+            )
         logger.info(f"Airtable: whop membership ended whop={whop_user_id}")
     except Exception as e:
         logger.warning(f"Airtable whop_membership_ended failed: {e}")
@@ -169,6 +212,8 @@ async def member_status_changed(telegram_user_id: int, status: str) -> None:
             telegram_user_id,
             canonical,
             whop_user_id=_linked_whop(telegram_user_id).get("whop_user_id"),
+            clear_onboarding_completed=canonical
+            in (MemberStatus.EXPIRED, MemberStatus.LEFT),
         )
         logger.info(f"Airtable: status tg={telegram_user_id} -> {canonical.value}")
     except Exception as e:
@@ -442,12 +487,16 @@ async def member_left_telegram(
     note = f"Left {where} at {left_at_iso} (Telegram group)"
     try:
         linked = _linked_whop(telegram_user_id)
-        await c.upsert_member(
+        extra: dict = {}
+        if telegram_username:
+            extra[MembersField.TELEGRAM_USERNAME] = telegram_username
+        if name:
+            extra[MembersField.NAME] = name
+        await c._set_member_status_with_onboarding_reset(
             telegram_user_id=telegram_user_id,
-            telegram_username=telegram_username,
-            name=name,
-            status=MemberStatus.LEFT,
             whop_user_id=linked.get("whop_user_id"),
+            status=MemberStatus.LEFT,
+            extra_fields=extra or None,
         )
         await c.append_member_note(
             telegram_user_id,

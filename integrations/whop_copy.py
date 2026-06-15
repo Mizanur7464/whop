@@ -178,6 +178,14 @@ def success_page_ready_message() -> str:
     )
 
 
+def membership_rejoin_message() -> str:
+    return (
+        "Welcome back! Your Whop access is active again.\n\n"
+        "Please send `/onboarding` to complete setup from the start. "
+        "Your main group invite will be sent after we approve your screenshot."
+    )
+
+
 def success_page_invite_heading() -> str:
     return "Join the main community group"
 

@@ -723,13 +723,97 @@ class AirtableClient:
         status: MemberStatus | str,
         *,
         whop_user_id: str | None = None,
+        clear_onboarding_completed: bool = False,
     ) -> Optional[dict]:
         if not self.enabled:
             return None
+        if clear_onboarding_completed:
+            return await self._set_member_status_with_onboarding_reset(
+                telegram_user_id=telegram_user_id,
+                status=status,
+                whop_user_id=whop_user_id,
+            )
         return await self.upsert_member(
             telegram_user_id=telegram_user_id,
             status=status,
             whop_user_id=whop_user_id,
+        )
+
+    async def _set_member_status_with_onboarding_reset(
+        self,
+        *,
+        telegram_user_id: int | None = None,
+        whop_user_id: str | None = None,
+        status: MemberStatus | str,
+        extra_fields: dict[str, Any] | None = None,
+    ) -> Optional[dict]:
+        """Set Status and clear Onboarding Completed (+ date) on the member row."""
+        if not self.enabled:
+            return None
+
+        status_value = status.value if isinstance(status, MemberStatus) else str(status)
+        fields: dict[str, Any] = {
+            MembersField.STATUS: status_value,
+            MembersField.ONBOARDING_COMPLETED: False,
+            MembersField.ONBOARDING_COMPLETED_AT: None,
+            MembersField.LAST_ACTIVITY: datetime.now(timezone.utc).isoformat(),
+        }
+        if extra_fields:
+            fields.update(extra_fields)
+        if telegram_user_id:
+            fields[MembersField.TELEGRAM_USER_ID] = str(telegram_user_id)
+        if whop_user_id:
+            fields[MembersField.WHOP_USER_ID] = whop_user_id
+
+        async with member_upsert_lock(
+            telegram_user_id=telegram_user_id,
+            whop_user_id=whop_user_id,
+        ):
+            existing = await self.consolidate_member_rows(
+                telegram_user_id=telegram_user_id,
+                whop_user_id=whop_user_id,
+            )
+            table = self._table(settings.airtable_members_table)
+            if existing:
+                return await self._run(table.update, existing["id"], fields)
+            if not telegram_user_id and whop_user_id:
+                fields.setdefault(
+                    MembersField.TELEGRAM_USER_ID,
+                    self._placeholder_telegram_id(whop_user_id),
+                )
+            return await self._run(table.create, fields)
+
+    async def reactivate_member_for_onboarding(
+        self,
+        *,
+        telegram_user_id: int,
+        whop_user_id: str | None = None,
+        whop_membership_id: str | None = None,
+        plan: str | None = None,
+        email: str | None = None,
+        name: str | None = None,
+        telegram_username: str | None = None,
+    ) -> Optional[dict]:
+        """Whop rejoin — same row, onboarding reset, Status=Pending until re-approved."""
+        extra: dict[str, Any] = {
+            MembersField.TELEGRAM_CLAIMED: True,
+        }
+        if whop_membership_id:
+            extra[MembersField.WHOP_MEMBERSHIP_ID] = whop_membership_id
+        plan_value = self._plan_field(plan)
+        if plan_value:
+            extra[MembersField.PLAN] = plan_value
+        if email:
+            extra[MembersField.EMAIL] = email
+        if name:
+            extra[MembersField.NAME] = name
+        if telegram_username:
+            extra[MembersField.TELEGRAM_USERNAME] = telegram_username
+        return await self._set_member_status_with_onboarding_reset(
+            telegram_user_id=telegram_user_id,
+            whop_user_id=whop_user_id,
+            status=MemberStatus.PENDING,
+            extra_fields=extra,
         )
 
     async def append_member_note(

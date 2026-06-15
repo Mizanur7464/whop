@@ -204,6 +204,49 @@ async def on_membership_valid(payload: dict) -> None:
             storage.link_whop_user(tg_id, whop_user, plan=plan_name)
 
     if tg_id:
+        checkout_email = _checkout_email(entity) or _checkout_email_from_payload(payload)
+        rejoin = storage.should_reset_onboarding_on_rejoin(tg_id, membership_id)
+
+        if rejoin:
+            local_user = storage.prepare_membership_rejoin(
+                tg_id,
+                whop_user_id=whop_user,
+                whop_membership_id=membership_id,
+                plan=plan_name,
+            )
+            if checkout_email:
+                storage.upsert_user(
+                    tg_id,
+                    checkout_email=checkout_email,
+                    contact_email=checkout_email,
+                )
+            await airtable_sync.member_rejoined(
+                telegram_user_id=tg_id,
+                telegram_username=local_user.get("username"),
+                name=" ".join(
+                    p
+                    for p in [local_user.get("first_name"), local_user.get("last_name")]
+                    if p
+                ).strip()
+                or None,
+                whop_user_id=whop_user,
+                whop_membership_id=membership_id,
+                plan=plan_name,
+                email=checkout_email,
+            )
+            from integrations.whop_copy import membership_rejoin_message
+
+            await telegram_ops.dm(
+                tg_id,
+                membership_rejoin_message(),
+                parse_mode="Markdown",
+            )
+            logger.info(
+                f"Whop rejoin tg={tg_id} whop={whop_user} "
+                f"membership={membership_id} — onboarding reset"
+            )
+            return
+
         local_user = storage.upsert_user(
             tg_id,
             whop_user_id=whop_user,
@@ -214,7 +257,6 @@ async def on_membership_valid(payload: dict) -> None:
         result = await telegram_ops.grant_access(tg_id, chats, plan_name=plan_name)
         logger.info(f"Granted access to tg={tg_id} for whop={whop_user}: {result}")
 
-        checkout_email = _checkout_email(entity) or _checkout_email_from_payload(payload)
         await airtable_sync.member_joined(
             telegram_user_id=tg_id,
             telegram_username=local_user.get("username"),
