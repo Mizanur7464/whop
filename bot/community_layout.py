@@ -28,6 +28,7 @@ FLOW_EDUCATION = "education"
 FLOW_PNL = "pnl"
 FLOW_NOTIFICATIONS = "notifications"
 FLOW_TRADING_TALKS = "trading_talks"
+FLOW_MEMBERS_RESULTS = "members_results"
 FLOW_MEMBERS_COMMUNITY = "members_community"
 FLOW_SIGNUP_SUPPORT = "signup_support"
 FLOW_SIGNUP_INSTRUCTIONS = "signup_instructions"
@@ -43,6 +44,7 @@ _FLOW_TOPIC_ATTR = {
     FLOW_PNL: "telegram_topic_pnl",
     FLOW_NOTIFICATIONS: "telegram_topic_notifications",
     FLOW_TRADING_TALKS: "telegram_topic_trading_talks",
+    FLOW_MEMBERS_RESULTS: "telegram_topic_members_results",
 }
 
 _WELCOME_GROUP_TOPIC_ATTR = {
@@ -73,6 +75,7 @@ _FLOW_LABEL = {
     FLOW_PNL: "PnL",
     FLOW_NOTIFICATIONS: "Daily Notifications",
     FLOW_TRADING_TALKS: "Trading Talks",
+    FLOW_MEMBERS_RESULTS: "Members Results",
     FLOW_MEMBERS_COMMUNITY: "Members Community",
     FLOW_SIGNUP_SUPPORT: "Sign Up Support",
     FLOW_SIGNUP_INSTRUCTIONS: "Sign Up Instructions",
@@ -153,6 +156,7 @@ def unlock_topic_flows() -> list[str]:
         for f in (
             FLOW_SIGNALS,
             FLOW_TRADING_TALKS,
+            FLOW_MEMBERS_RESULTS,
             FLOW_NOTIFICATIONS,
             FLOW_PNL,
             FLOW_COPYTRADING,

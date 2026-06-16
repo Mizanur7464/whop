@@ -1,9 +1,9 @@
 """
 Delete non-admin messages in moderated community groups.
 
-Main group (Fusion Strategy Members):
-    * All topics are admin-only for members (including Trading Talks).
-    * Legacy TELEGRAM_TOPIC_EDUCATION is no longer a member-chat lane.
+Main group (Fusion Strategy Community / Members):
+    * Most topics are admin-only for members.
+    * Members Results: members may chat; links deleted for non-admins.
 
 Welcome group:
     * Members may chat in Members Community + Sign Up Support only.
@@ -59,6 +59,15 @@ def welcome_member_chat_topic_ids() -> frozenset[int]:
     return frozenset(ids)
 
 
+def main_member_chat_topic_ids() -> frozenset[int]:
+    """Main group topics where members may chat (Members Results)."""
+    ids: set[int] = set()
+    if isinstance(settings.telegram_topic_members_results, int):
+        ids.add(settings.telegram_topic_members_results)
+    ids.update(_parse_topic_id_csv(settings.group_moderation_member_chat_topics_csv))
+    return frozenset(ids)
+
+
 def welcome_admin_only_topic_ids() -> frozenset[int]:
     """Welcome group topics where member messages are deleted."""
     ids: set[int] = set()
@@ -95,8 +104,9 @@ def main_admin_only_topic_ids() -> frozenset[int]:
 
 
 def no_links_topic_ids() -> frozenset[int]:
-    """Topics where member link posts are deleted (welcome member-chat lanes)."""
+    """Topics where member link posts are deleted."""
     ids = set(welcome_member_chat_topic_ids())
+    ids.update(main_member_chat_topic_ids())
     ids.update(_parse_topic_id_csv(settings.group_moderation_no_links_topics_csv))
     return frozenset(ids)
 
@@ -113,6 +123,13 @@ def admin_only_topic_ids() -> frozenset[int]:
 
 def _is_welcome_member_chat_topic(msg: Message) -> bool:
     allowed = welcome_member_chat_topic_ids()
+    if not allowed or not msg.message_thread_id:
+        return False
+    return msg.message_thread_id in allowed
+
+
+def _is_main_member_chat_topic(msg: Message) -> bool:
+    allowed = main_member_chat_topic_ids()
     if not allowed or not msg.message_thread_id:
         return False
     return msg.message_thread_id in allowed
@@ -185,10 +202,12 @@ def should_delete_member_message(msg: Message, *, main_group: bool) -> bool:
     """
     Return True when a non-admin member message should be deleted.
 
-    Main group: all member messages deleted (admin-only topics).
+    Main group: allow Members Results; other topics admin-only.
     Welcome group: allow Members Community + Sign Up Support only.
     """
     if main_group:
+        if _is_main_member_chat_topic(msg):
+            return False
         return True
 
     if _is_welcome_member_chat_topic(msg):
@@ -257,12 +276,13 @@ async def on_welcome_group_message(
 def moderation_summary() -> str:
     """Human-readable summary for /topicid and logs."""
     welcome_chat = sorted(welcome_member_chat_topic_ids())
+    main_chat = sorted(main_member_chat_topic_ids())
     no_links = sorted(no_links_topic_ids())
     main_blocked = sorted(main_admin_only_topic_ids())
     lines = [
-        "Main group: all member messages deleted (admin-only topics)",
-        f"Welcome member chat: {welcome_chat or 'NOT SET — set WELCOME_GROUP_TOPIC_MEMBERS_COMMUNITY + SIGNUP_SUPPORT'}",
-        f"Welcome link ban topics: {no_links or 'same as welcome member chat when unset'}",
+        f"Main member chat (e.g. Members Results): {main_chat or 'NOT SET — TELEGRAM_TOPIC_MEMBERS_RESULTS'}",
+        f"Welcome member chat: {welcome_chat or 'NOT SET'}",
+        f"Link ban topics: {no_links or 'member-chat topics when unset'}",
         f"Main admin-only topic IDs: {main_blocked or 'none configured'}",
     ]
     return "\n".join(lines)

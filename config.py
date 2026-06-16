@@ -89,6 +89,9 @@ class Settings(BaseSettings):
     telegram_topic_trading_talks: Optional[int] = Field(
         default=None, alias="TELEGRAM_TOPIC_TRADING_TALKS"
     )
+    telegram_topic_members_results: Optional[int] = Field(
+        default=None, alias="TELEGRAM_TOPIC_MEMBERS_RESULTS"
+    )
     telegram_topic_pnl: Optional[int] = Field(
         default=None, alias="TELEGRAM_TOPIC_PNL"
     )
@@ -200,6 +203,7 @@ class Settings(BaseSettings):
         "telegram_topic_signals",
         "telegram_topic_education",
         "telegram_topic_trading_talks",
+        "telegram_topic_members_results",
         "telegram_topic_pnl",
         "telegram_topic_notifications",
         mode="before",

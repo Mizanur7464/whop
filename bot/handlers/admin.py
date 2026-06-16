@@ -218,6 +218,10 @@ async def cmd_topicid(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         group_name = "Main community group"
         topic_lines = [
             ("TELEGRAM_TOPIC_TRADING_TALKS", "Trading Talks (admin-only)"),
+            (
+                "TELEGRAM_TOPIC_MEMBERS_RESULTS",
+                "Members Results (member chat OK, no links)",
+            ),
             ("TELEGRAM_TOPIC_SIGNALS", "Signals (admin-only)"),
             ("TELEGRAM_TOPIC_COPYTRADING", "Copy Trading (admin-only)"),
             ("TELEGRAM_TOPIC_SUPPORT", "Support (admin-only)"),
@@ -298,6 +302,14 @@ async def cmd_create_members_topic(
         if not gid:
             await update.message.reply_text(
                 "Set TELEGRAM_MAIN_GROUP_ID in .env for Trading Talks."
+            )
+            return
+    elif "members results" in name_lower:
+        gid = settings.telegram_main_group_id
+        env_key = "TELEGRAM_TOPIC_MEMBERS_RESULTS"
+        if not gid:
+            await update.message.reply_text(
+                "Set TELEGRAM_MAIN_GROUP_ID in .env for Members Results."
             )
             return
 
