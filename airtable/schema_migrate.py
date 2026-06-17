@@ -194,6 +194,82 @@ def _choice_id(choice: Any) -> str | None:
     return getattr(choice, "id", None)
 
 
+def _choice_color(choice: Any) -> str | None:
+    if isinstance(choice, dict):
+        return choice.get("color")
+    return getattr(choice, "color", None)
+
+
+_SELECT_COLORS = (
+    "blueLight2",
+    "cyanLight2",
+    "tealLight2",
+    "greenLight2",
+    "yellowLight2",
+    "orangeLight2",
+    "redLight2",
+    "pinkLight2",
+    "purpleLight2",
+    "grayLight2",
+)
+
+
+def _build_select_choices(
+    existing_choices: list[Any],
+    missing_names: list[str],
+) -> list[dict[str, Any]]:
+    """Preserve existing select options and append new ones with Airtable colors."""
+    updated: list[dict[str, Any]] = []
+    for choice in existing_choices:
+        entry: dict[str, Any] = {"name": _choice_name(choice)}
+        cid = _choice_id(choice)
+        if cid:
+            entry["id"] = cid
+        color = _choice_color(choice)
+        if color:
+            entry["color"] = color
+        updated.append(entry)
+
+    color_idx = 0
+    for name in missing_names:
+        updated.append(
+            {
+                "name": name,
+                "color": _SELECT_COLORS[color_idx % len(_SELECT_COLORS)],
+            }
+        )
+        color_idx += 1
+    return updated
+
+
+def _patch_select_choices(
+    api,
+    *,
+    base_id: str,
+    api_table,
+    field,
+    choices: list[dict[str, Any]],
+) -> None:
+    url = str(
+        api.build_url(
+            "meta",
+            "bases",
+            base_id,
+            "tables",
+            api_table.id,
+            "fields",
+            field.id,
+        )
+    )
+    api.patch(
+        url,
+        json={
+            "type": "singleSelect",
+            "options": {"choices": choices},
+        },
+    )
+
+
 def _ensure_members_status_choices(
     api,
     *,
@@ -217,28 +293,16 @@ def _ensure_members_status_choices(
     if "Left" in names:
         return [], []
 
-    updated: list[dict[str, Any]] = []
-    for choice in choices:
-        entry: dict[str, Any] = {"name": _choice_name(choice)}
-        cid = _choice_id(choice)
-        if cid:
-            entry["id"] = cid
-        updated.append(entry)
-    updated.append({"name": "Left", "color": "grayLight2"})
+    updated = _build_select_choices(choices, ["Left"])
 
     try:
-        url = str(
-            api.build_url(
-                "meta",
-                "bases",
-                base_id,
-                "tables",
-                api_table.id,
-                "fields",
-                field.id,
-            )
+        _patch_select_choices(
+            api,
+            base_id=base_id,
+            api_table=api_table,
+            field=field,
+            choices=updated,
         )
-        api.patch(url, json={"options": {"choices": updated}})
         return ["added Status choice: Left"], []
     except Exception as e:
         logger.warning("Could not add Status choice Left: %s", e)
@@ -269,29 +333,16 @@ def _ensure_finance_category_choices(
     if not missing:
         return [], []
 
-    updated: list[dict[str, Any]] = []
-    for choice in choices:
-        entry: dict[str, Any] = {"name": _choice_name(choice)}
-        cid = _choice_id(choice)
-        if cid:
-            entry["id"] = cid
-        updated.append(entry)
-    for choice in missing:
-        updated.append({"name": choice})
+    updated = _build_select_choices(choices, missing)
 
     try:
-        url = str(
-            api.build_url(
-                "meta",
-                "bases",
-                base_id,
-                "tables",
-                api_table.id,
-                "fields",
-                field.id,
-            )
+        _patch_select_choices(
+            api,
+            base_id=base_id,
+            api_table=api_table,
+            field=field,
+            choices=updated,
         )
-        api.patch(url, json={"options": {"choices": updated}})
         return [f"added Category choices: {', '.join(missing)}"], []
     except Exception as e:
         logger.warning("Could not add Finance Category choices: %s", e)
