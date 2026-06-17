@@ -296,10 +296,11 @@ def reset_onboarding_progress(user_id: int) -> dict:
     )
 
 
-def mark_membership_inactive(user_id: int, *, reason: str) -> dict:
+def mark_membership_inactive(
+    user_id: int, *, reason: str, status: str | None = None
+) -> dict:
     """Allow re-onboarding after Telegram leave or Whop expiry (same CRM row)."""
-    return upsert_user(
-        user_id,
+    fields: dict = dict(
         membership_inactive=True,
         membership_inactive_reason=reason,
         approval_status=APPROVAL_NONE,
@@ -314,6 +315,9 @@ def mark_membership_inactive(user_id: int, *, reason: str) -> dict:
         review_decided_by_username=None,
         review_decided_at=None,
     )
+    if status:
+        fields["status"] = status
+    return upsert_user(user_id, **fields)
 
 
 def clear_membership_inactive(user_id: int) -> dict:

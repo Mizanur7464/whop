@@ -27,7 +27,10 @@ from bot import storage
 from config import settings
 from integrations import plan_mapping, telegram_ops
 from integrations.whop_copy import is_free_access, membership_received_dm
-from integrations.whop_payment_amounts import parse_whop_payment_amounts
+from integrations.whop_payment_amounts import (
+    parse_whop_payment_amounts,
+    parse_whop_payment_category,
+)
 
 Handler = Callable[[dict], Awaitable[None]]
 
@@ -106,6 +109,34 @@ def _payment_ref(entity: dict, payload: dict | None = None) -> str | None:
             raw = block.get(key)
             if isinstance(raw, str) and raw.startswith("pay_"):
                 return raw.strip()
+    return None
+
+
+def _resolve_payment_id(
+    entity: dict,
+    payload: dict,
+    *,
+    allow_membership_fallback: bool = False,
+) -> str | None:
+    """Resolve a stable finance entry id (prefer ``pay_...`` ids)."""
+    ref = _payment_ref(entity, payload)
+    if ref:
+        return ref
+
+    payment_id = entity.get("payment_id")
+    if isinstance(payment_id, str) and payment_id.startswith("pay_"):
+        return payment_id.strip()
+
+    raw_id = entity.get("id")
+    if isinstance(raw_id, str) and raw_id.startswith("pay_"):
+        return raw_id.strip()
+
+    if allow_membership_fallback:
+        amount, _, net_amount, _ = parse_whop_payment_amounts(entity)
+        membership_id = _membership_id(entity)
+        if membership_id and (amount > 0 or net_amount > 0):
+            return f"{membership_id}-initial"
+
     return None
 
 
@@ -190,6 +221,10 @@ async def on_membership_valid(payload: dict) -> None:
     if not whop_user or not membership_id:
         logger.warning(f"membership.went_valid missing IDs: {entity}")
         return
+
+    await _sync_payment_to_airtable(
+        entity, payload, allow_membership_fallback=True
+    )
 
     plan_name = plan_mapping.resolve_plan_name(product_id, _product_name(entity))
     chats = plan_mapping.resolve_chats_for_product(product_id)
@@ -356,6 +391,13 @@ async def on_membership_invalid(payload: dict) -> None:
         await airtable_sync.whop_membership_ended(whop_user)
         return
 
+    user = storage.get_user(tg_id) or {}
+    if user.get("membership_inactive_reason") == "left":
+        logger.info(
+            f"membership.went_invalid skipped — user left Telegram tg={tg_id}"
+        )
+        return
+
     chats = plan_mapping.resolve_chats_for_product(product_id)
     if not chats:
         chats = tuple(plan_mapping.all_known_chats())
@@ -401,36 +443,55 @@ async def on_membership_cancel_change(payload: dict) -> None:
         )
 
 
-async def on_payment_succeeded(payload: dict) -> None:
-    """Mirror every successful payment into the Airtable Finance table."""
-    entity = _data(payload)
-    payment_id = entity.get("id") or entity.get("payment_id") or ""
+async def _sync_payment_to_airtable(
+    entity: dict,
+    payload: dict,
+    *,
+    allow_membership_fallback: bool = False,
+) -> None:
+    """Write a successful Whop charge to Airtable Finance (idempotent by payment id)."""
+    payment_id = _resolve_payment_id(
+        entity,
+        payload,
+        allow_membership_fallback=allow_membership_fallback,
+    )
     amount, fees, net_amount, currency = parse_whop_payment_amounts(entity)
-    whop_user = _whop_user_id(entity)
-    product_id = _product_id(entity)
-    plan_name = plan_mapping.resolve_plan_name(product_id, _product_name(entity))
-
     if not payment_id:
-        logger.warning(f"payment_succeeded missing id: {entity}")
         return
 
+    whop_user = _whop_user_id(entity)
+    product_id = _product_id(entity)
+    product_name = _product_name(entity)
+    plan_name = product_name or plan_mapping.resolve_plan_name(product_id, product_name)
+    category = parse_whop_payment_category(entity)
+    checkout_email = _checkout_email(entity) or _checkout_email_from_payload(payload)
+    date_iso = entity.get("created_at") or entity.get("paid_at") or entity.get("date")
     tg_id = storage.get_telegram_id_for_whop_user(whop_user) if whop_user else None
 
     await airtable_sync.payment_recorded(
         payment_id=str(payment_id),
         telegram_user_id=tg_id,
         whop_user_id=whop_user,
+        email=checkout_email,
         amount=amount,
         fees=fees,
         net_amount=net_amount,
         currency=str(currency),
         plan=plan_name,
+        category=category,
         status="succeeded",
+        date_iso=date_iso if isinstance(date_iso, str) else None,
     )
     logger.info(
-        f"Payment succeeded: id={payment_id} amount={amount} fees={fees} "
+        f"Payment synced: id={payment_id} amount={amount} fees={fees} "
         f"net={net_amount} {currency}"
     )
+
+
+async def on_payment_succeeded(payload: dict) -> None:
+    """Mirror every successful payment into the Airtable Finance table."""
+    entity = _data(payload)
+    await _sync_payment_to_airtable(entity, payload)
 
 
 async def on_payment_failed(payload: dict) -> None:
@@ -468,4 +529,7 @@ _ROUTES: dict[str, Handler] = {
     # Payments
     "payment_succeeded": on_payment_succeeded,
     "payment_failed": on_payment_failed,
+    "payment_created": on_payment_succeeded,
+    "payment_completed": on_payment_succeeded,
+    "membership_payment_succeeded": on_payment_succeeded,
 }

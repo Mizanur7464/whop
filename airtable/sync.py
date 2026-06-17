@@ -581,6 +581,9 @@ async def payment_recorded(
     notes: str | None = None,
     fees: float | None = None,
     net_amount: float | None = None,
+    category: str | None = None,
+    email: str | None = None,
+    date_iso: str | None = None,
 ) -> None:
     c = client()
     if not c.enabled:
@@ -598,6 +601,7 @@ async def payment_recorded(
             payment_id=payment_id,
             telegram_user_id=telegram_user_id,
             whop_user_id=whop_user_id,
+            email=email,
             amount=amount,
             fees=fees,
             net_amount=net_amount,
@@ -605,6 +609,8 @@ async def payment_recorded(
             plan=plan,
             status=canonical,
             notes=notes,
+            category=category,
+            date_iso=date_iso,
         )
         logger.info(
             f"Airtable: payment {payment_id} {amount} {currency} ({canonical.value})"

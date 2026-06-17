@@ -61,3 +61,57 @@ def parse_whop_payment_amounts(entity: dict) -> tuple[float, float, float, str]:
         amount = net_amount + fees
 
     return amount, fees, net_amount, currency
+
+
+def parse_whop_payment_category(entity: dict) -> str:
+    """Return ``subscription`` or ``one time payment`` for Airtable Category."""
+    from airtable.schema import PaymentCategory
+
+    membership = (
+        entity.get("membership") if isinstance(entity.get("membership"), dict) else {}
+    )
+    product = entity.get("product") if isinstance(entity.get("product"), dict) else {}
+
+    hints: list[Any] = [
+        entity.get("billing_reason"),
+        entity.get("payment_type"),
+        entity.get("type"),
+        entity.get("plan_type"),
+        membership.get("plan_type"),
+        membership.get("renewal"),
+        product.get("plan_type"),
+        product.get("billing_period"),
+        product.get("renewal_period"),
+    ]
+
+    for raw in hints:
+        if raw is None:
+            continue
+        val = str(raw).strip().lower().replace("-", "_").replace(" ", "_")
+        if any(
+            token in val
+            for token in ("subscription", "recurring", "renewal", "cycle")
+        ):
+            return PaymentCategory.SUBSCRIPTION.value
+        if any(token in val for token in ("one_time", "onetime", "single", "lifetime")):
+            return PaymentCategory.ONE_TIME.value
+        if val in {"monthly", "yearly", "weekly", "annual", "quarterly"}:
+            return PaymentCategory.SUBSCRIPTION.value
+
+    if entity.get("is_renewal") or membership.get("renewal"):
+        return PaymentCategory.SUBSCRIPTION.value
+
+    period = product.get("billing_period") or product.get("renewal_period")
+    if period and str(period).strip().lower() not in {
+        "one_time",
+        "onetime",
+        "lifetime",
+        "none",
+        "",
+    }:
+        return PaymentCategory.SUBSCRIPTION.value
+
+    if membership.get("id") or entity.get("membership_id"):
+        return PaymentCategory.SUBSCRIPTION.value
+
+    return PaymentCategory.ONE_TIME.value

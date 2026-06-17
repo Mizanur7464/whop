@@ -28,6 +28,17 @@ _FINANCE_SELECT_FIXES: dict[str, list[str]] = {
     FinanceField.TYPE: ["Payment", "Expense"],
 }
 
+_FINANCE_CATEGORY_CHOICES = [
+    "subscription",
+    "one time payment",
+    "Ads",
+    "Tools",
+    "Salary",
+    "Software",
+    "Hosting",
+    "Other",
+]
+
 _MEMBERS_STATUS_CHOICES = ["Active", "Expired", "Banned", "Pending", "Left"]
 
 _DEPRECATED_EXPENSES_NAME = "Expenses (deprecated — use Payments)"
@@ -234,6 +245,59 @@ def _ensure_members_status_choices(
         return [], [f"Status Left: could not add ({e})"]
 
 
+def _ensure_finance_category_choices(
+    api,
+    *,
+    base_id: str,
+    api_table,
+    base_schema,
+) -> tuple[list[str], list[str]]:
+    """Add payment category options to Finance Category select if missing."""
+    field = _get_field_schema(base_schema, api_table.name, FinanceField.CATEGORY)
+    if field is None:
+        return [], []
+    if field.type != "singleSelect":
+        return [], []
+
+    options = getattr(field, "options", None)
+    choices = getattr(options, "choices", None) if options else None
+    if not choices:
+        return [], []
+
+    names = {_choice_name(c) for c in choices}
+    missing = [c for c in _FINANCE_CATEGORY_CHOICES if c not in names]
+    if not missing:
+        return [], []
+
+    updated: list[dict[str, Any]] = []
+    for choice in choices:
+        entry: dict[str, Any] = {"name": _choice_name(choice)}
+        cid = _choice_id(choice)
+        if cid:
+            entry["id"] = cid
+        updated.append(entry)
+    for choice in missing:
+        updated.append({"name": choice})
+
+    try:
+        url = str(
+            api.build_url(
+                "meta",
+                "bases",
+                base_id,
+                "tables",
+                api_table.id,
+                "fields",
+                field.id,
+            )
+        )
+        api.patch(url, json={"options": {"choices": updated}})
+        return [f"added Category choices: {', '.join(missing)}"], []
+    except Exception as e:
+        logger.warning("Could not add Finance Category choices: %s", e)
+        return [], [f"Category choices: could not add ({e})"]
+
+
 def migrate_airtable_schema(*, create_missing_tables: bool = True) -> dict[str, Any]:
     """
     Ensure Members, Finance/Payments, and Checklist tables exist with all fields.
@@ -338,7 +402,15 @@ def migrate_airtable_schema(*, create_missing_tables: bool = True) -> dict[str, 
             )
             fixed.extend(type_fixed)
             errors.extend(type_errors)
-            if type_fixed:
+            cat_fixed, cat_errors = _ensure_finance_category_choices(
+                api,
+                base_id=settings.airtable_base_id,
+                api_table=tbl,
+                base_schema=base_schema,
+            )
+            fixed.extend(cat_fixed)
+            errors.extend(cat_errors)
+            if type_fixed or cat_fixed:
                 base_schema = base.schema(force=True)
 
         report["tables"][table_name] = {

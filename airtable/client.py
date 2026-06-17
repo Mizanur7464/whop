@@ -46,6 +46,7 @@ from airtable.schema import (
     FinanceType,
     MembersField,
     MemberStatus,
+    PaymentCategory,
     PaymentsField,
     PaymentStatus,
     SUPPORTED_CURRENCIES,
@@ -933,15 +934,44 @@ class AirtableClient:
                 )
             return result
 
+    async def find_member_by_email(self, email: str) -> Optional[dict]:
+        normalized = email.strip().lower()
+        if not normalized or "@" not in normalized:
+            return None
+        table = self._table(settings.airtable_members_table)
+        rec = await self._run(
+            table.first, formula=match({MembersField.EMAIL: normalized})
+        )
+        if rec:
+            return rec
+        escaped = normalized.replace("'", "\\'")
+        formula = f"LOWER({{{MembersField.EMAIL}}}) = '{escaped}'"
+        return await self._run(table.first, formula=formula)
+
     async def find_member_record_id(
-        self, telegram_user_id: int, *, whop_user_id: str | None = None
+        self,
+        telegram_user_id: int | None = None,
+        *,
+        whop_user_id: str | None = None,
+        email: str | None = None,
     ) -> Optional[str]:
         if not self.enabled:
             return None
-        rec = await self.find_member_for_telegram(
-            telegram_user_id, whop_user_id=whop_user_id
-        )
-        return rec["id"] if rec else None
+        if telegram_user_id is not None:
+            rec = await self.find_member_for_telegram(
+                telegram_user_id, whop_user_id=whop_user_id
+            )
+            if rec:
+                return rec["id"]
+        if whop_user_id:
+            rec = await self.find_member_by_whop_user_id(whop_user_id)
+            if rec:
+                return rec["id"]
+        if email:
+            rec = await self.find_member_by_email(email)
+            if rec:
+                return rec["id"]
+        return None
 
     # ---------- Finance (payments + expenses in one table) ----------
 
@@ -967,9 +997,10 @@ class AirtableClient:
         fees: float | None = None,
         net_amount: float | None = None,
         whop_user_id: str | None = None,
+        email: str | None = None,
         plan: str | None = None,
         status: PaymentStatus | str | None = None,
-        category: ExpenseCategory | str | None = None,
+        category: ExpenseCategory | PaymentCategory | str | None = None,
         description: str | None = None,
         added_by: str | None = None,
         notes: str | None = None,
@@ -997,7 +1028,10 @@ class AirtableClient:
             FinanceField.DATE: date_iso or datetime.now(timezone.utc).isoformat(),
         }
         plan_value = self._plan_field(plan)
-        if plan_value:
+        if type_value == FinanceType.PAYMENT.value:
+            if plan and plan.strip():
+                fields[FinanceField.PLAN] = plan.strip()[:80]
+        elif plan_value:
             fields[FinanceField.PLAN] = plan_value
         if whop_user_id:
             fields[FinanceField.WHOP_USER_ID] = whop_user_id
@@ -1006,9 +1040,12 @@ class AirtableClient:
                 status.value if isinstance(status, PaymentStatus) else str(status)
             )
         if category is not None:
-            fields[FinanceField.CATEGORY] = (
-                category.value if isinstance(category, ExpenseCategory) else str(category)
+            cat_value = (
+                category.value
+                if isinstance(category, (ExpenseCategory, PaymentCategory))
+                else str(category)
             )
+            fields[FinanceField.CATEGORY] = cat_value
         if description:
             fields[FinanceField.DESCRIPTION] = description
         if added_by:
@@ -1016,8 +1053,12 @@ class AirtableClient:
         if notes:
             fields[FinanceField.NOTES] = notes
 
-        if telegram_user_id is not None:
-            member_rec_id = await self.find_member_record_id(telegram_user_id)
+        if telegram_user_id is not None or whop_user_id or email:
+            member_rec_id = await self.find_member_record_id(
+                telegram_user_id,
+                whop_user_id=whop_user_id,
+                email=email,
+            )
             if member_rec_id:
                 fields[FinanceField.MEMBER] = [member_rec_id]
 
@@ -1032,18 +1073,23 @@ class AirtableClient:
         if result is None:
             legacy = {
                 entry_id_field: entry_id,
+                FinanceField.TYPE: type_value,
                 FinanceField.AMOUNT: fields[FinanceField.AMOUNT],
                 FinanceField.CURRENCY: fields[FinanceField.CURRENCY],
                 FinanceField.DATE: fields[FinanceField.DATE],
             }
-            if FinanceField.PLAN in fields:
-                legacy[FinanceField.PLAN] = fields[FinanceField.PLAN]
-            if FinanceField.WHOP_USER_ID in fields:
-                legacy[FinanceField.WHOP_USER_ID] = fields[FinanceField.WHOP_USER_ID]
-            if FinanceField.STATUS in fields:
-                legacy[FinanceField.STATUS] = fields[FinanceField.STATUS]
-            if FinanceField.MEMBER in fields:
-                legacy[FinanceField.MEMBER] = fields[FinanceField.MEMBER]
+            for optional_key in (
+                FinanceField.FEES,
+                FinanceField.NET_AMOUNT,
+                FinanceField.PLAN,
+                FinanceField.WHOP_USER_ID,
+                FinanceField.STATUS,
+                FinanceField.CATEGORY,
+                FinanceField.MEMBER,
+                FinanceField.NOTES,
+            ):
+                if optional_key in fields:
+                    legacy[optional_key] = fields[optional_key]
             if existing:
                 return await self._run(table.update, existing["id"], legacy)
             return await self._run(table.create, legacy)
@@ -1060,9 +1106,11 @@ class AirtableClient:
         status: PaymentStatus | str = PaymentStatus.SUCCEEDED,
         date_iso: str | None = None,
         whop_user_id: str | None = None,
+        email: str | None = None,
         notes: str | None = None,
         fees: float | None = None,
         net_amount: float | None = None,
+        category: PaymentCategory | str | None = None,
     ) -> Optional[dict]:
         return await self.record_finance_entry(
             entry_id=payment_id,
@@ -1076,7 +1124,9 @@ class AirtableClient:
             status=status,
             date_iso=date_iso,
             whop_user_id=whop_user_id,
+            email=email,
             notes=notes,
+            category=category,
         )
 
     async def add_expense(

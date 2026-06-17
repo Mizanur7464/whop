@@ -13,6 +13,7 @@ from airtable import sync as airtable_sync
 from bot import storage
 from bot.leave_survey_config import get as leave_cfg
 from config import settings
+from integrations.whop_api import WhopAPIError, WhopClient
 
 _LEAVE_REASON_KEY = "leave_survey_reason"
 
@@ -33,6 +34,28 @@ def _monitored_groups() -> dict[int, str]:
 
 def _group_label(group_key: str) -> str:
     return _GROUP_LABELS.get(group_key, group_key)
+
+
+async def _terminate_whop_membership(telegram_user_id: int) -> None:
+    user = storage.get_user(telegram_user_id) or {}
+    membership_id = (user.get("whop_membership_id") or "").strip()
+    if not membership_id:
+        return
+    try:
+        async with WhopClient() as client:
+            await client.terminate_membership(membership_id)
+        logger.info(
+            f"leave_survey: terminated Whop membership {membership_id} "
+            f"tg={telegram_user_id}"
+        )
+    except WhopAPIError as e:
+        logger.warning(
+            f"leave_survey: Whop terminate failed tg={telegram_user_id}: {e}"
+        )
+    except Exception as e:
+        logger.warning(
+            f"leave_survey: Whop terminate error tg={telegram_user_id}: {e}"
+        )
 
 
 def leave_reason_active(_: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
@@ -72,7 +95,8 @@ async def on_chat_member(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         left_at_iso=when,
         group_name=_group_label(group_key),
     )
-    storage.mark_membership_inactive(user.id, reason="left")
+    storage.mark_membership_inactive(user.id, reason="left", status="left")
+    await _terminate_whop_membership(user.id)
 
     cfg = leave_cfg()
     markup = InlineKeyboardMarkup(

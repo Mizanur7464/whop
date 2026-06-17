@@ -102,7 +102,16 @@ def finance_fields(members_table_id: str) -> list[dict]:
         _select("Status", ["Succeeded", "Failed", "Refunded"]),
         _select(
             "Category",
-            ["Ads", "Tools", "Salary", "Software", "Hosting", "Other"],
+            [
+                "subscription",
+                "one time payment",
+                "Ads",
+                "Tools",
+                "Salary",
+                "Software",
+                "Hosting",
+                "Other",
+            ],
         ),
         {"name": "Description", "type": "multilineText"},
         {"name": "Added By", "type": "singleLineText"},
