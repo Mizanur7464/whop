@@ -98,6 +98,19 @@ def resolve_plan_name(
     return "unknown"
 
 
+def resolve_plan_from_membership(m: dict) -> str:
+    """Resolve plan label from a Whop membership API payload."""
+    product = m.get("product") if isinstance(m.get("product"), dict) else {}
+    product_id = m.get("product_id") or product.get("id")
+    product_label = (
+        product.get("title")
+        or product.get("name")
+        or m.get("product_name")
+        or m.get("plan_name")
+    )
+    return resolve_plan_name(product_id, product_label)
+
+
 def plan_for_airtable(plan: str | None) -> str | None:
     """Format plan for Airtable — always persist something when we have a value."""
     if not plan or not plan.strip():

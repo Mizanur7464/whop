@@ -129,6 +129,21 @@ class Settings(BaseSettings):
     airtable_payments_table: str = Field(default="Payments", alias="AIRTABLE_PAYMENTS_TABLE")
     airtable_expenses_table: str = Field(default="Expenses", alias="AIRTABLE_EXPENSES_TABLE")
     airtable_checklist_table: str = Field(default="Checklist", alias="AIRTABLE_CHECKLIST_TABLE")
+    airtable_vantage_clients_table: str = Field(
+        default="Vantage Clients", alias="AIRTABLE_VANTAGE_CLIENTS_TABLE"
+    )
+    airtable_premier_clients_table: str = Field(
+        default="Premier Clients", alias="AIRTABLE_PREMIER_CLIENTS_TABLE"
+    )
+    airtable_client_uid_field: str = Field(
+        default="UID", alias="AIRTABLE_CLIENT_UID_FIELD"
+    )
+    airtable_members_link_vantage_field: str = Field(
+        default="Vantage Client", alias="AIRTABLE_MEMBERS_LINK_VANTAGE_FIELD"
+    )
+    airtable_members_link_premier_field: str = Field(
+        default="Premier Client", alias="AIRTABLE_MEMBERS_LINK_PREMIER_FIELD"
+    )
 
     # ---- App ----
     environment: str = Field(default="development", alias="ENVIRONMENT")

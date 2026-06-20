@@ -973,6 +973,157 @@ class AirtableClient:
                 return rec["id"]
         return None
 
+    def _platform_client_table(self, platform: str) -> str | None:
+        normalized = normalize_trading_platform(platform)
+        if normalized == "Vantage":
+            name = settings.airtable_vantage_clients_table.strip()
+            return name or None
+        if normalized == "Premier":
+            name = settings.airtable_premier_clients_table.strip()
+            return name or None
+        return None
+
+    def _platform_client_link_field(self, platform: str) -> str | None:
+        normalized = normalize_trading_platform(platform)
+        if normalized == "Vantage":
+            return settings.airtable_members_link_vantage_field.strip() or None
+        if normalized == "Premier":
+            return settings.airtable_members_link_premier_field.strip() or None
+        return None
+
+    async def find_platform_client_by_uid(
+        self, platform: str, uid: str
+    ) -> Optional[dict]:
+        """Find a Vantage/Premier client row by UID (matches text or numeric UID)."""
+        if not self.enabled:
+            return None
+        table_name = self._platform_client_table(platform)
+        uid_clean = (uid or "").strip()
+        if not table_name or not uid_clean:
+            return None
+
+        uid_field = settings.airtable_client_uid_field.strip() or "UID"
+        table = self._table(table_name)
+        rec = await self._run(table.first, formula=match({uid_field: uid_clean}))
+        if rec:
+            return rec
+        if uid_clean.isdigit():
+            rec = await self._run(
+                table.first, formula=f"{{{uid_field}}} = {uid_clean}"
+            )
+            if rec:
+                return rec
+            escaped = uid_clean.replace("'", "\\'")
+            rec = await self._run(
+                table.first,
+                formula=f"FIND('{escaped}', CONCATENATE('', {{{uid_field}}}))",
+            )
+            if rec:
+                return rec
+        return None
+
+    async def link_member_to_platform_client(
+        self,
+        *,
+        telegram_user_id: int | None = None,
+        whop_user_id: str | None = None,
+        platform: str | None = None,
+        platform_user_id: str | None = None,
+    ) -> bool:
+        """Link a Members row to Vantage Clients / Premier Clients when UID matches."""
+        if not self.enabled:
+            return False
+        platform_norm = normalize_trading_platform(platform)
+        pid = (platform_user_id or "").strip()
+        link_field = self._platform_client_link_field(platform or "")
+        if not platform_norm or not pid or not link_field:
+            return False
+
+        client_rec = await self.find_platform_client_by_uid(platform_norm, pid)
+        if not client_rec:
+            logger.info(
+                f"Airtable: no {platform_norm} client for UID={pid!r} "
+                f"(tg={telegram_user_id})"
+            )
+            return False
+
+        member = await self.consolidate_member_rows(
+            telegram_user_id=telegram_user_id,
+            whop_user_id=whop_user_id,
+            platform_user_id=pid,
+        )
+        if not member:
+            return False
+
+        table = self._table(settings.airtable_members_table)
+        result = await self._run(
+            table.update,
+            member["id"],
+            {link_field: [client_rec["id"]]},
+        )
+        if result:
+            logger.info(
+                f"Airtable: linked member {member['id']} → "
+                f"{platform_norm} client {client_rec['id']} (UID={pid})"
+            )
+        return result is not None
+
+    async def backfill_platform_client_links(self) -> dict[str, int]:
+        """Scan Members rows and link to Vantage/Premier client tables by Platform User ID."""
+        if not self.enabled:
+            return {"linked": 0, "missing_client": 0, "skipped": 0, "failed": 0}
+
+        table = self._table(settings.airtable_members_table)
+        records = await self._run(table.all) or []
+        linked = missing_client = skipped = failed = 0
+
+        for rec in records:
+            fields = rec.get("fields") or {}
+            platform = fields.get(MembersField.PLATFORM)
+            pid = fields.get(MembersField.PLATFORM_USER_ID)
+            if not platform or not pid:
+                skipped += 1
+                continue
+
+            link_field = self._platform_client_link_field(str(platform))
+            if link_field and fields.get(link_field):
+                skipped += 1
+                continue
+
+            tg_raw = fields.get(MembersField.TELEGRAM_USER_ID)
+            tg_id: int | None = None
+            if tg_raw is not None:
+                tg_str = str(tg_raw).strip()
+                if tg_str.isdigit() and not tg_str.startswith("whop:"):
+                    tg_id = int(tg_str)
+
+            whop = fields.get(MembersField.WHOP_USER_ID)
+            whop_id = str(whop).strip() if whop else None
+
+            try:
+                ok = await self.link_member_to_platform_client(
+                    telegram_user_id=tg_id,
+                    whop_user_id=whop_id,
+                    platform=str(platform),
+                    platform_user_id=str(pid),
+                )
+            except Exception as e:
+                logger.warning(f"Airtable link backfill failed row={rec.get('id')}: {e}")
+                failed += 1
+                continue
+
+            if ok:
+                linked += 1
+            else:
+                missing_client += 1
+
+        return {
+            "linked": linked,
+            "missing_client": missing_client,
+            "skipped": skipped,
+            "failed": failed,
+        }
+
     # ---------- Finance (payments + expenses in one table) ----------
 
     @staticmethod
@@ -1070,6 +1221,21 @@ class AirtableClient:
             result = await self._run(table.update, existing["id"], fields)
         else:
             result = await self._run(table.create, fields)
+
+        if result is None and FinanceField.CATEGORY in fields:
+            cat_note = f"Category: {fields[FinanceField.CATEGORY]}"
+            fields_no_cat = {
+                k: v for k, v in fields.items() if k != FinanceField.CATEGORY
+            }
+            if notes:
+                fields_no_cat[FinanceField.NOTES] = f"{cat_note}\n{notes}"
+            else:
+                fields_no_cat[FinanceField.NOTES] = cat_note
+            if existing:
+                result = await self._run(table.update, existing["id"], fields_no_cat)
+            else:
+                result = await self._run(table.create, fields_no_cat)
+
         if result is None:
             legacy = {
                 entry_id_field: entry_id,

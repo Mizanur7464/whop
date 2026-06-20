@@ -579,22 +579,32 @@ async def cmd_sync(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         if not whop_user:
             continue
 
-        plan = plan_mapping.resolve_plan_name(product_id)
+        plan = plan_mapping.resolve_plan_from_membership(m)
+        if plan == "unknown" and product_id:
+            try:
+                product = await client.get_product(str(product_id))
+                plan = plan_mapping.resolve_plan_name(
+                    product_id,
+                    (product.get("title") or product.get("name")),
+                )
+            except WhopAPIError:
+                pass
+
         profile = profile_from_membership(m)
         existing_tg = storage.get_telegram_id_for_whop_user(whop_user)
         tg_username: str | None = None
         tg_name: str | None = profile.name
+        local_platform: str | None = None
+        local_platform_uid: str | None = None
+        local_phone: str | None = profile.phone
         if existing_tg:
             local = storage.get_user(existing_tg) or {}
             tg_username = local.get("username") or None
-            tg_name = (
-                " ".join(
-                    p
-                    for p in [local.get("first_name"), local.get("last_name")]
-                    if p
-                ).strip()
-                or profile.name
-            )
+            tg_name = airtable_sync._name_from_user(local) or profile.name
+            local_platform = local.get("platform")
+            local_platform_uid = local.get("platform_user_id")
+            if local.get("contact_phone"):
+                local_phone = local.get("contact_phone")
             storage.upsert_user(
                 existing_tg,
                 whop_user_id=whop_user,
@@ -608,9 +618,11 @@ async def cmd_sync(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
 
         email = profile.email
         if existing_tg:
-            checkout = (storage.get_user(existing_tg) or {}).get("checkout_email")
-            if checkout:
-                email = checkout.strip().lower()
+            local = storage.get_user(existing_tg) or {}
+            email = (
+                airtable_sync._email_from_user(local, profile.email)
+                or profile.email
+            )
 
         await airtable_sync.sync_whop_membership(
             whop_user_id=str(whop_user),
@@ -618,15 +630,18 @@ async def cmd_sync(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
             plan=plan,
             email=email,
             name=tg_name,
-            phone=profile.phone,
+            phone=local_phone,
             join_date=profile.join_date,
             telegram_user_id=existing_tg,
             telegram_username=tg_username,
             telegram_claimed=existing_tg is not None,
+            platform=local_platform,
+            platform_user_id=local_platform_uid,
         )
         airtable_synced += 1
 
     dedupe = await airtable_sync.reconcile_members_table()
+    client_links = await airtable_sync.link_all_platform_clients()
 
     body = (
         "🔄 *Sync complete*\n\n"
@@ -635,9 +650,34 @@ async def cmd_sync(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         f"• Awaiting `/claim` link: *{pending}*\n"
         f"• Airtable rows upserted: *{airtable_synced}*\n"
         f"• Duplicate groups merged: *{dedupe.get('groups_merged', 0)}* "
-        f"(`{dedupe.get('rows_before', 0)}` → `{dedupe.get('rows_after', 0)}` rows)"
+        f"(`{dedupe.get('rows_before', 0)}` → `{dedupe.get('rows_after', 0)}` rows)\n"
+        f"• Platform client links: *{client_links.get('linked', 0)}* linked, "
+        f"*{client_links.get('missing_client', 0)}* UID not in client table"
     )
     await update.message.reply_text(body, parse_mode=ParseMode.MARKDOWN)
+
+
+@admin_only
+@log_call
+async def cmd_fix_members_crm(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
+    """Backfill member CRM fields from bot storage + link Vantage/Premier clients."""
+    await update.message.reply_text(
+        "Backfilling member CRM from bot storage and linking platform clients…"
+    )
+    dedupe = await airtable_sync.reconcile_members_table()
+    members = await airtable_sync.backfill_members_crm_from_storage()
+    links = await airtable_sync.link_all_platform_clients()
+    await update.message.reply_text(
+        "✅ *Members CRM backfill complete*\n\n"
+        f"• Rows updated from bot storage: *{members.get('updated', 0)}*\n"
+        f"• Client links from storage: *{members.get('linked_clients', 0)}*\n"
+        f"• Skipped (no data): *{members.get('skipped', 0)}*\n"
+        f"• Failed: *{members.get('failed', 0)}*\n"
+        f"• Duplicate groups merged: *{dedupe.get('groups_merged', 0)}*\n"
+        f"• All-member client scan: *{links.get('linked', 0)}* linked, "
+        f"*{links.get('missing_client', 0)}* no matching UID",
+        parse_mode=ParseMode.MARKDOWN,
+    )
 
 
 @admin_only

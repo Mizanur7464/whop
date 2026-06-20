@@ -118,6 +118,10 @@ def list_active_user_ids() -> list[int]:
     return [uid for uid, u in _users.items() if u.get("status") == "active"]
 
 
+def list_all_user_ids() -> list[int]:
+    return list(_users.keys())
+
+
 def list_onboarding_approved_user_ids() -> list[int]:
     """Users approved through onboarding (for CRM backfill)."""
     return [

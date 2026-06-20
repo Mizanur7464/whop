@@ -24,6 +24,8 @@ class MembersField:
     PHONE = "Phone"
     PLATFORM = "Platform"
     PLATFORM_USER_ID = "Platform User ID"
+    VANTAGE_CLIENT = "Vantage Client"
+    PREMIER_CLIENT = "Premier Client"
     WHOP_USER_ID = "Whop User ID"
     WHOP_MEMBERSHIP_ID = "Whop Membership ID"
     PLAN = "Plan"

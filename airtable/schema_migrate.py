@@ -313,6 +313,7 @@ def _ensure_finance_category_choices(
     api,
     *,
     base_id: str,
+    base,
     api_table,
     base_schema,
 ) -> tuple[list[str], list[str]]:
@@ -333,20 +334,89 @@ def _ensure_finance_category_choices(
     if not missing:
         return [], []
 
-    updated = _build_select_choices(choices, missing)
+    fixed: list[str] = []
+    errors: list[str] = []
+    for choice_name in missing:
+        field = _get_field_schema(base_schema, api_table.name, FinanceField.CATEGORY)
+        if field is None:
+            break
+        options = getattr(field, "options", None)
+        choices = getattr(options, "choices", None) if options else None
+        if not choices:
+            break
+        names = {_choice_name(c) for c in choices}
+        if choice_name in names:
+            continue
+        updated = _build_select_choices(choices, [choice_name])
+        try:
+            _patch_select_choices(
+                api,
+                base_id=base_id,
+                api_table=api_table,
+                field=field,
+                choices=updated,
+            )
+            fixed.append(f"added Category choice: {choice_name}")
+            base_schema = base.schema(force=True)
+        except Exception as e:
+            logger.warning(
+                "Could not add Finance Category choice %s: %s", choice_name, e
+            )
+            errors.append(f"Category {choice_name}: could not add ({e})")
+            break
 
-    try:
-        _patch_select_choices(
-            api,
-            base_id=base_id,
-            api_table=api_table,
-            field=field,
-            choices=updated,
-        )
-        return [f"added Category choices: {', '.join(missing)}"], []
-    except Exception as e:
-        logger.warning("Could not add Finance Category choices: %s", e)
-        return [], [f"Category choices: could not add ({e})"]
+    return fixed, errors
+
+
+def _ensure_member_client_link_fields(
+    api,
+    *,
+    base_id: str,
+    api_table,
+    base_schema,
+) -> tuple[list[str], list[str]]:
+    """Add link fields on Members → Vantage Clients / Premier Clients if tables exist."""
+    fixed: list[str] = []
+    errors: list[str] = []
+    present = _table_field_names(base_schema, api_table.name)
+
+    pairs = [
+        (
+            settings.airtable_vantage_clients_table.strip(),
+            settings.airtable_members_link_vantage_field.strip(),
+        ),
+        (
+            settings.airtable_premier_clients_table.strip(),
+            settings.airtable_members_link_premier_field.strip(),
+        ),
+    ]
+
+    for client_table_name, link_field_name in pairs:
+        if not client_table_name or not link_field_name:
+            continue
+        if link_field_name in present:
+            continue
+        try:
+            client_schema = base_schema.table(client_table_name)
+        except KeyError:
+            continue
+        try:
+            api_table.create_field(
+                link_field_name,
+                "multipleRecordLinks",
+                options={"linkedTableId": client_schema.id},
+            )
+            fixed.append(f"added link field {link_field_name}")
+            present.add(link_field_name)
+            logger.info(
+                "Airtable: added %s on %s", link_field_name, api_table.name
+            )
+        except Exception as e:
+            msg = f"{link_field_name}: {e}"
+            errors.append(msg)
+            logger.warning("Airtable: could not add link field %s — %s", link_field_name, e)
+
+    return fixed, errors
 
 
 def migrate_airtable_schema(*, create_missing_tables: bool = True) -> dict[str, Any]:
@@ -444,6 +514,14 @@ def migrate_airtable_schema(*, create_missing_tables: bool = True) -> dict[str, 
             )
             fixed.extend(status_fixed)
             errors.extend(status_errors)
+            link_fixed, link_errors = _ensure_member_client_link_fields(
+                api,
+                base_id=settings.airtable_base_id,
+                api_table=tbl,
+                base_schema=base_schema,
+            )
+            fixed.extend(link_fixed)
+            errors.extend(link_errors)
         if table_name == settings.airtable_finance_table:
             type_fixed, type_errors = _fix_finance_field_types(
                 api,
@@ -456,6 +534,7 @@ def migrate_airtable_schema(*, create_missing_tables: bool = True) -> dict[str, 
             cat_fixed, cat_errors = _ensure_finance_category_choices(
                 api,
                 base_id=settings.airtable_base_id,
+                base=base,
                 api_table=tbl,
                 base_schema=base_schema,
             )

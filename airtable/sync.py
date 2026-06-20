@@ -45,6 +45,34 @@ def _linked_whop(telegram_user_id: int) -> dict:
     }
 
 
+def _email_from_user(user: dict, fallback: str | None = None) -> str | None:
+    for key in ("checkout_email", "contact_email", "email"):
+        raw = (user.get(key) or "").strip().lower()
+        if raw and "@" in raw:
+            return raw
+    if fallback and "@" in fallback:
+        return fallback.strip().lower()
+    return None
+
+
+def _name_from_user(user: dict) -> str | None:
+    full = (user.get("contact_full_name") or "").strip()
+    if full:
+        return full
+    parts = [
+        (user.get("contact_first_name") or "").strip(),
+        (user.get("contact_last_name") or "").strip(),
+    ]
+    joined = " ".join(p for p in parts if p).strip()
+    if joined:
+        return joined
+    parts = [
+        (user.get("first_name") or "").strip(),
+        (user.get("last_name") or "").strip(),
+    ]
+    return " ".join(p for p in parts if p).strip() or None
+
+
 # ---------- Member lifecycle ----------
 
 async def member_joined(
@@ -139,6 +167,8 @@ async def sync_whop_membership(
     telegram_username: str | None = None,
     telegram_claimed: bool = False,
     status: MemberStatus | str = MemberStatus.ACTIVE,
+    platform: str | None = None,
+    platform_user_id: str | None = None,
 ) -> None:
     """Upsert a Whop member into Airtable (claimed or awaiting Telegram /claim)."""
     c = client()
@@ -157,7 +187,16 @@ async def sync_whop_membership(
             telegram_username=telegram_username,
             telegram_claimed=telegram_claimed,
             status=status,
+            platform=platform,
+            platform_user_id=platform_user_id,
         )
+        if platform and platform_user_id:
+            await c.link_member_to_platform_client(
+                telegram_user_id=telegram_user_id,
+                whop_user_id=whop_user_id,
+                platform=platform,
+                platform_user_id=platform_user_id,
+            )
         logger.info(
             f"Airtable: whop sync whop={whop_user_id} claimed={telegram_claimed}"
         )
@@ -281,6 +320,15 @@ async def onboarding_completed(
             if result and (result.get("fields") or {}).get(
                 MembersField.ONBOARDING_COMPLETED
             ):
+                plat = platform or user.get("platform")
+                pid = platform_user_id or user.get("platform_user_id")
+                if plat and pid:
+                    await c.link_member_to_platform_client(
+                        telegram_user_id=telegram_user_id,
+                        whop_user_id=linked.get("whop_user_id"),
+                        platform=plat,
+                        platform_user_id=str(pid),
+                    )
                 logger.info(f"Airtable: onboarding done tg={telegram_user_id}")
                 return True
             last_err = "checkbox not set on Airtable row"
@@ -431,6 +479,17 @@ async def member_platform_selected(
             whop_membership_id=linked.get("whop_membership_id"),
             plan=linked.get("plan"),
         )
+        from bot import storage
+
+        user = storage.get_user(telegram_user_id) or {}
+        pid = user.get("platform_user_id")
+        if pid:
+            await c.link_member_to_platform_client(
+                telegram_user_id=telegram_user_id,
+                whop_user_id=linked.get("whop_user_id"),
+                platform=platform,
+                platform_user_id=str(pid),
+            )
         logger.info(f"Airtable: platform={platform!r} tg={telegram_user_id}")
     except Exception as e:
         logger.warning(f"Airtable member_platform_selected failed: {e}")
@@ -463,6 +522,13 @@ async def member_contact_collected(
             whop_membership_id=linked.get("whop_membership_id"),
             plan=linked.get("plan"),
         )
+        if platform and platform_user_id:
+            await c.link_member_to_platform_client(
+                telegram_user_id=telegram_user_id,
+                whop_user_id=linked.get("whop_user_id"),
+                platform=platform,
+                platform_user_id=platform_user_id,
+            )
         logger.info(
             f"Airtable: contact saved tg={telegram_user_id} "
             f"platform={platform!r} platform_user_id={platform_user_id!r}"
@@ -617,3 +683,67 @@ async def payment_recorded(
         )
     except Exception as e:
         logger.warning(f"Airtable payment_recorded failed: {e}")
+
+
+async def backfill_members_crm_from_storage() -> dict[str, int]:
+    """Push locally stored member fields (email, plan, platform UID) to Airtable."""
+    from bot import storage
+
+    c = client()
+    if not c.enabled:
+        return {"updated": 0, "linked_clients": 0, "skipped": 0, "failed": 0}
+
+    updated = linked_clients = skipped = failed = 0
+    for user_id in storage.list_all_user_ids():
+        user = storage.get_user(user_id) or {}
+        whop_user_id = user.get("whop_user_id")
+        if not whop_user_id and not user.get("platform_user_id"):
+            skipped += 1
+            continue
+
+        email = _email_from_user(user)
+        try:
+            await c.upsert_member(
+                telegram_user_id=user_id,
+                telegram_username=user.get("username"),
+                name=_name_from_user(user),
+                whop_user_id=whop_user_id,
+                whop_membership_id=user.get("whop_membership_id"),
+                plan=user.get("plan"),
+                email=email,
+                phone=user.get("contact_phone"),
+                platform=user.get("platform"),
+                platform_user_id=user.get("platform_user_id"),
+                telegram_claimed=bool(whop_user_id),
+            )
+            updated += 1
+            if user.get("platform") and user.get("platform_user_id"):
+                if await c.link_member_to_platform_client(
+                    telegram_user_id=user_id,
+                    whop_user_id=whop_user_id,
+                    platform=user.get("platform"),
+                    platform_user_id=user.get("platform_user_id"),
+                ):
+                    linked_clients += 1
+        except Exception as e:
+            logger.warning(f"Airtable backfill member tg={user_id} failed: {e}")
+            failed += 1
+
+    return {
+        "updated": updated,
+        "linked_clients": linked_clients,
+        "skipped": skipped,
+        "failed": failed,
+    }
+
+
+async def link_all_platform_clients() -> dict[str, int]:
+    """Backfill Vantage/Premier client links for all Members rows."""
+    c = client()
+    if not c.enabled:
+        return {"linked": 0, "missing_client": 0, "skipped": 0, "failed": 0}
+    try:
+        return await c.backfill_platform_client_links()
+    except Exception as e:
+        logger.warning(f"Airtable link_all_platform_clients failed: {e}")
+        return {"linked": 0, "missing_client": 0, "skipped": 0, "failed": 0}
