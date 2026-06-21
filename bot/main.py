@@ -162,6 +162,7 @@ def build_app() -> Application:
     app.add_handler(CommandHandler("unban", admin.cmd_unban))
     app.add_handler(CommandHandler("sync", admin.cmd_sync))
     app.add_handler(CommandHandler("fix_members_crm", admin.cmd_fix_members_crm))
+    app.add_handler(CommandHandler("audit_members", admin.cmd_audit_members))
     app.add_handler(CommandHandler("fix_onboarding_crm", admin.cmd_fix_onboarding_crm))
     app.add_handler(CommandHandler("whop_test", admin.cmd_whop_test))
     app.add_handler(CommandHandler("claims", claim.cmd_pending_claims))

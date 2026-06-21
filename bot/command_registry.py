@@ -77,6 +77,7 @@ ADMIN_COMMANDS: list[BotCommand] = MEMBER_DM_COMMANDS + [
     BotCommand("unban", "Reinstate a user"),
     BotCommand("sync", "Pull memberships from Whop"),
     BotCommand("fix_members_crm", "Backfill member CRM + platform links"),
+    BotCommand("audit_members", "Audit Whop-linked vs Telegram-only rows"),
     BotCommand("fix_onboarding_crm", "Backfill onboarding checkboxes in CRM"),
     BotCommand("whop_test", "Ping the Whop API"),
     BotCommand("claims", "List pending claims"),

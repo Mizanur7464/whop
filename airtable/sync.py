@@ -753,3 +753,15 @@ async def link_all_platform_clients() -> dict[str, int]:
     except Exception as e:
         logger.warning(f"Airtable link_all_platform_clients failed: {e}")
         return {"linked": 0, "missing_client": 0, "skipped": 0, "failed": 0}
+
+
+async def audit_members_crm() -> dict:
+    """Report Whop-linked vs Telegram-only rows in the CRM table."""
+    c = client()
+    if not c.enabled:
+        return {"ok": False, "reason": "Airtable disabled"}
+    try:
+        return await c.audit_members_table()
+    except Exception as e:
+        logger.warning(f"Airtable audit_members_crm failed: {e}")
+        return {"ok": False, "reason": str(e)[:200]}

@@ -628,6 +628,8 @@ class AirtableClient:
                 fields[MembersField.STATUS] = (
                     status.value if isinstance(status, MemberStatus) else str(status)
                 )
+            elif not whop_user_id:
+                fields[MembersField.STATUS] = MemberStatus.PENDING.value
             if join_date:
                 fields[MembersField.JOIN_DATE] = join_date
             if email:
@@ -641,6 +643,8 @@ class AirtableClient:
                 fields[MembersField.PLATFORM_USER_ID] = platform_user_id.strip()
             if telegram_claimed is not None:
                 fields[MembersField.TELEGRAM_CLAIMED] = telegram_claimed
+            elif not whop_user_id:
+                fields[MembersField.TELEGRAM_CLAIMED] = False
             fields[MembersField.LAST_ACTIVITY] = datetime.now(timezone.utc).isoformat()
 
             match_formula = match(
@@ -889,14 +893,21 @@ class AirtableClient:
             return None
 
         completed_at = datetime.now(timezone.utc).isoformat()
+        has_whop = bool((whop_user_id or "").strip())
         fields: dict[str, Any] = {
             MembersField.TELEGRAM_USER_ID: str(telegram_user_id),
             MembersField.ONBOARDING_COMPLETED: True,
             MembersField.ONBOARDING_COMPLETED_AT: completed_at,
-            MembersField.STATUS: MemberStatus.ACTIVE.value,
-            MembersField.TELEGRAM_CLAIMED: True,
+            MembersField.STATUS: (
+                MemberStatus.ACTIVE.value
+                if has_whop
+                else MemberStatus.PENDING.value
+            ),
+            MembersField.TELEGRAM_CLAIMED: has_whop,
             MembersField.LAST_ACTIVITY: completed_at,
         }
+        if whop_user_id:
+            fields[MembersField.WHOP_USER_ID] = whop_user_id
         plan_value = self._plan_field(plan)
         if plan_value:
             fields[MembersField.PLAN] = plan_value
@@ -1122,6 +1133,53 @@ class AirtableClient:
             "missing_client": missing_client,
             "skipped": skipped,
             "failed": failed,
+        }
+
+    async def audit_members_table(self, *, sample_limit: int = 8) -> dict[str, Any]:
+        """Summarise CRM rows: Whop-linked vs Telegram-only (no Whop purchase linked)."""
+        if not self.enabled:
+            return {"ok": False, "reason": "Airtable disabled"}
+
+        table = self._table(settings.airtable_members_table)
+        records = await self._run(table.all) or []
+
+        whop_linked = telegram_only = whop_unclaimed = missing_email = 0
+        samples_telegram_only: list[str] = []
+
+        for rec in records:
+            fields = rec.get("fields") or {}
+            whop = (fields.get(MembersField.WHOP_USER_ID) or "").strip()
+            email = (fields.get(MembersField.EMAIL) or "").strip()
+            name = (fields.get(MembersField.NAME) or "—").strip()
+            tg_raw = fields.get(MembersField.TELEGRAM_USER_ID)
+            tg_str = str(tg_raw).strip() if tg_raw is not None else ""
+            is_placeholder_tg = self._is_placeholder_telegram_id(tg_str)
+
+            if whop and is_placeholder_tg:
+                whop_unclaimed += 1
+            elif whop and not is_placeholder_tg:
+                whop_linked += 1
+            elif not whop and tg_str and not is_placeholder_tg:
+                telegram_only += 1
+                if len(samples_telegram_only) < sample_limit:
+                    uname = fields.get(MembersField.TELEGRAM_USERNAME) or ""
+                    label = f"{name} (tg {tg_str}"
+                    if uname:
+                        label += f", @{uname}"
+                    label += ")"
+                    samples_telegram_only.append(label)
+
+            if not email and (whop or (tg_str and not is_placeholder_tg)):
+                missing_email += 1
+
+        return {
+            "ok": True,
+            "total": len(records),
+            "whop_linked": whop_linked,
+            "telegram_only": telegram_only,
+            "whop_unclaimed": whop_unclaimed,
+            "missing_email": missing_email,
+            "samples_telegram_only": samples_telegram_only,
         }
 
     # ---------- Finance (payments + expenses in one table) ----------

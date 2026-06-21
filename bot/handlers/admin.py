@@ -682,6 +682,34 @@ async def cmd_fix_members_crm(update: Update, _: ContextTypes.DEFAULT_TYPE) -> N
 
 @admin_only
 @log_call
+async def cmd_audit_members(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show Whop-linked vs Telegram-only member rows in Airtable."""
+    await update.message.reply_text("Auditing member CRM rows…")
+    report = await airtable_sync.audit_members_crm()
+    if not report.get("ok"):
+        await update.message.reply_text(
+            f"❌ Audit failed: {report.get('reason', 'unknown')}"
+        )
+        return
+
+    samples = report.get("samples_telegram_only") or []
+    sample_lines = "\n".join(f"  • {s}" for s in samples[:8]) or "  _(none)_"
+    body = (
+        "📋 *Member CRM audit*\n\n"
+        f"• Total rows: *{report.get('total', 0)}*\n"
+        f"• Whop linked (paid + claimed): *{report.get('whop_linked', 0)}*\n"
+        f"• Telegram only (no Whop link): *{report.get('telegram_only', 0)}*\n"
+        f"• Whop paid, awaiting `/claim`: *{report.get('whop_unclaimed', 0)}*\n"
+        f"• Missing email: *{report.get('missing_email', 0)}*\n\n"
+        "*Telegram-only examples (not in Whop):*\n"
+        f"{sample_lines}\n\n"
+        "_Telegram-only rows used the bot but never linked a Whop purchase via `/claim`._"
+    )
+    await update.message.reply_text(body, parse_mode=ParseMode.MARKDOWN)
+
+
+@admin_only
+@log_call
 async def cmd_fix_onboarding_crm(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
     """Backfill Onboarding Completed checkbox for all locally approved users."""
     await update.message.reply_text(
