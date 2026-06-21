@@ -29,6 +29,8 @@ _FINANCE_SELECT_FIXES: dict[str, list[str]] = {
 }
 
 _FINANCE_CATEGORY_CHOICES = [
+    "Subscription",
+    "One Time Payment",
     "subscription",
     "one time payment",
     "Ads",

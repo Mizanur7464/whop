@@ -137,6 +137,17 @@ def _resolve_payment_id(
         if membership_id and (amount > 0 or net_amount > 0):
             return f"{membership_id}-initial"
 
+    amount, _, net_amount, _ = parse_whop_payment_amounts(entity)
+    if amount > 0 or net_amount > 0:
+        raw_id = entity.get("id")
+        if isinstance(raw_id, str) and raw_id.strip():
+            return raw_id.strip()
+        whop_user = _whop_user_id(entity)
+        paid_at = entity.get("created_at") or entity.get("paid_at") or ""
+        if whop_user:
+            suffix = str(paid_at)[:19] if paid_at else "unknown"
+            return f"whop-{whop_user}-{suffix}"
+
     return None
 
 
@@ -457,6 +468,10 @@ async def _sync_payment_to_airtable(
     )
     amount, fees, net_amount, currency = parse_whop_payment_amounts(entity)
     if not payment_id:
+        logger.warning(
+            f"payment sync skipped — no payment id "
+            f"(amount={amount} net={net_amount} whop={_whop_user_id(entity)})"
+        )
         return
 
     whop_user = _whop_user_id(entity)
@@ -484,14 +499,16 @@ async def _sync_payment_to_airtable(
     )
     logger.info(
         f"Payment synced: id={payment_id} amount={amount} fees={fees} "
-        f"net={net_amount} {currency}"
+        f"net={net_amount} {currency} category={category!r}"
     )
 
 
 async def on_payment_succeeded(payload: dict) -> None:
     """Mirror every successful payment into the Airtable Finance table."""
     entity = _data(payload)
-    await _sync_payment_to_airtable(entity, payload)
+    await _sync_payment_to_airtable(
+        entity, payload, allow_membership_fallback=True
+    )
 
 
 async def on_payment_failed(payload: dict) -> None:
@@ -532,4 +549,6 @@ _ROUTES: dict[str, Handler] = {
     "payment_created": on_payment_succeeded,
     "payment_completed": on_payment_succeeded,
     "membership_payment_succeeded": on_payment_succeeded,
+    "invoice_paid": on_payment_succeeded,
+    "invoice_payment_succeeded": on_payment_succeeded,
 }

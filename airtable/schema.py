@@ -129,8 +129,8 @@ SUPPORTED_CURRENCIES = frozenset(c.value for c in Currency)
 
 
 class PaymentCategory(str, Enum):
-    SUBSCRIPTION = "subscription"
-    ONE_TIME = "one time payment"
+    SUBSCRIPTION = "Subscription"
+    ONE_TIME = "One Time Payment"
 
 
 class ExpenseCategory(str, Enum):

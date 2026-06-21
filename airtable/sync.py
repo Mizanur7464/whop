@@ -663,7 +663,7 @@ async def payment_recorded(
     canonical = mapping.get(status.lower(), PaymentStatus.SUCCEEDED)
 
     try:
-        await c.record_payment(
+        result = await c.record_payment(
             payment_id=payment_id,
             telegram_user_id=telegram_user_id,
             whop_user_id=whop_user_id,
@@ -678,9 +678,15 @@ async def payment_recorded(
             category=category,
             date_iso=date_iso,
         )
-        logger.info(
-            f"Airtable: payment {payment_id} {amount} {currency} ({canonical.value})"
-        )
+        if result is None:
+            logger.error(
+                f"Airtable payment_recorded failed (no row saved): id={payment_id} "
+                f"amount={amount} {currency}"
+            )
+        else:
+            logger.info(
+                f"Airtable: payment {payment_id} {amount} {currency} ({canonical.value})"
+            )
     except Exception as e:
         logger.warning(f"Airtable payment_recorded failed: {e}")
 

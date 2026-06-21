@@ -1217,11 +1217,15 @@ class AirtableClient:
         existing = await self._run(
             table.first, formula=match({entry_id_field: entry_id})
         )
-        if existing:
-            result = await self._run(table.update, existing["id"], fields)
-        else:
-            result = await self._run(table.create, fields)
 
+        async def _write(payload_fields: dict[str, Any]) -> Optional[dict]:
+            if existing:
+                return await self._run(table.update, existing["id"], payload_fields)
+            return await self._run(table.create, payload_fields)
+
+        result = await _write(fields)
+
+        fields_no_cat: dict[str, Any] | None = None
         if result is None and FinanceField.CATEGORY in fields:
             cat_note = f"Category: {fields[FinanceField.CATEGORY]}"
             fields_no_cat = {
@@ -1231,34 +1235,35 @@ class AirtableClient:
                 fields_no_cat[FinanceField.NOTES] = f"{cat_note}\n{notes}"
             else:
                 fields_no_cat[FinanceField.NOTES] = cat_note
-            if existing:
-                result = await self._run(table.update, existing["id"], fields_no_cat)
-            else:
-                result = await self._run(table.create, fields_no_cat)
+            result = await _write(fields_no_cat)
 
         if result is None:
-            legacy = {
+            source = fields_no_cat or fields
+            legacy: dict[str, Any] = {
                 entry_id_field: entry_id,
-                FinanceField.TYPE: type_value,
-                FinanceField.AMOUNT: fields[FinanceField.AMOUNT],
-                FinanceField.CURRENCY: fields[FinanceField.CURRENCY],
-                FinanceField.DATE: fields[FinanceField.DATE],
+                FinanceField.AMOUNT: source[FinanceField.AMOUNT],
+                FinanceField.CURRENCY: source[FinanceField.CURRENCY],
+                FinanceField.DATE: source[FinanceField.DATE],
             }
+            if FinanceField.TYPE in source:
+                legacy[FinanceField.TYPE] = source[FinanceField.TYPE]
             for optional_key in (
                 FinanceField.FEES,
                 FinanceField.NET_AMOUNT,
                 FinanceField.PLAN,
                 FinanceField.WHOP_USER_ID,
                 FinanceField.STATUS,
-                FinanceField.CATEGORY,
                 FinanceField.MEMBER,
                 FinanceField.NOTES,
             ):
-                if optional_key in fields:
-                    legacy[optional_key] = fields[optional_key]
-            if existing:
-                return await self._run(table.update, existing["id"], legacy)
-            return await self._run(table.create, legacy)
+                if optional_key in source:
+                    legacy[optional_key] = source[optional_key]
+            result = await _write(legacy)
+            if result is None:
+                logger.error(
+                    f"Airtable: failed to record finance entry id={entry_id} "
+                    f"type={type_value}"
+                )
         return result
 
     async def record_payment(

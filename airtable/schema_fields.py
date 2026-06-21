@@ -103,6 +103,8 @@ def finance_fields(members_table_id: str) -> list[dict]:
         _select(
             "Category",
             [
+                "Subscription",
+                "One Time Payment",
                 "subscription",
                 "one time payment",
                 "Ads",
