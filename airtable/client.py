@@ -1135,6 +1135,104 @@ class AirtableClient:
             "failed": failed,
         }
 
+    async def backfill_platform_client_links_from_client_tables(
+        self,
+    ) -> dict[str, int]:
+        """Scan Vantage/Premier client rows and link to Members by UID (reverse)."""
+        if not self.enabled:
+            return {
+                "linked": 0,
+                "missing_member": 0,
+                "skipped": 0,
+                "failed": 0,
+            }
+
+        uid_field = settings.airtable_client_uid_field.strip() or "UID"
+        linked = missing_member = skipped = failed = 0
+
+        for platform in ("Vantage", "Premier"):
+            table_name = self._platform_client_table(platform)
+            link_field = self._platform_client_link_field(platform)
+            if not table_name or not link_field:
+                continue
+
+            table = self._table(table_name)
+            try:
+                client_records = await self._run(table.all) or []
+            except Exception as e:
+                logger.warning(
+                    f"Airtable reverse link scan failed for {platform}: {e}"
+                )
+                failed += 1
+                continue
+
+            for client_rec in client_records:
+                fields = client_rec.get("fields") or {}
+                uid_raw = fields.get(uid_field)
+                if uid_raw is None or str(uid_raw).strip() == "":
+                    skipped += 1
+                    continue
+                uid_str = str(uid_raw).strip()
+
+                members = await self._collect_member_rows(platform_user_id=uid_str)
+                if not members:
+                    missing_member += 1
+                    continue
+
+                member = max(members, key=self._member_row_score)
+                member_fields = member.get("fields") or {}
+                if member_fields.get(link_field):
+                    skipped += 1
+                    continue
+
+                tg_raw = member_fields.get(MembersField.TELEGRAM_USER_ID)
+                tg_id: int | None = None
+                if tg_raw is not None:
+                    tg_str = str(tg_raw).strip()
+                    if tg_str.isdigit() and not tg_str.startswith("whop:"):
+                        tg_id = int(tg_str)
+
+                whop = member_fields.get(MembersField.WHOP_USER_ID)
+                whop_id = str(whop).strip() if whop else None
+
+                try:
+                    ok = await self.link_member_to_platform_client(
+                        telegram_user_id=tg_id,
+                        whop_user_id=whop_id,
+                        platform=platform,
+                        platform_user_id=uid_str,
+                    )
+                except Exception as e:
+                    logger.warning(
+                        f"Airtable reverse link failed {platform} UID={uid_str!r}: {e}"
+                    )
+                    failed += 1
+                    continue
+
+                if ok:
+                    linked += 1
+                else:
+                    missing_member += 1
+
+        return {
+            "linked": linked,
+            "missing_member": missing_member,
+            "skipped": skipped,
+            "failed": failed,
+        }
+
+    async def backfill_all_platform_client_links(self) -> dict[str, int]:
+        """Link Members ↔ Vantage/Premier clients in both directions by UID."""
+        members_scan = await self.backfill_platform_client_links()
+        clients_scan = await self.backfill_platform_client_links_from_client_tables()
+        return {
+            "linked": members_scan.get("linked", 0) + clients_scan.get("linked", 0),
+            "missing_client": members_scan.get("missing_client", 0),
+            "missing_member": clients_scan.get("missing_member", 0),
+            "skipped": members_scan.get("skipped", 0) + clients_scan.get("skipped", 0),
+            "failed": members_scan.get("failed", 0) + clients_scan.get("failed", 0),
+        }
+
     async def audit_members_table(self, *, sample_limit: int = 8) -> dict[str, Any]:
         """Summarise CRM rows: Whop-linked vs Telegram-only (no Whop purchase linked)."""
         if not self.enabled:

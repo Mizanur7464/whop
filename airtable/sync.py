@@ -744,15 +744,27 @@ async def backfill_members_crm_from_storage() -> dict[str, int]:
 
 
 async def link_all_platform_clients() -> dict[str, int]:
-    """Backfill Vantage/Premier client links for all Members rows."""
+    """Backfill Vantage/Premier client links (Members → clients and reverse)."""
     c = client()
     if not c.enabled:
-        return {"linked": 0, "missing_client": 0, "skipped": 0, "failed": 0}
+        return {
+            "linked": 0,
+            "missing_client": 0,
+            "missing_member": 0,
+            "skipped": 0,
+            "failed": 0,
+        }
     try:
-        return await c.backfill_platform_client_links()
+        return await c.backfill_all_platform_client_links()
     except Exception as e:
         logger.warning(f"Airtable link_all_platform_clients failed: {e}")
-        return {"linked": 0, "missing_client": 0, "skipped": 0, "failed": 0}
+        return {
+            "linked": 0,
+            "missing_client": 0,
+            "missing_member": 0,
+            "skipped": 0,
+            "failed": 0,
+        }
 
 
 async def audit_members_crm() -> dict:

@@ -95,6 +95,7 @@ async def _on_startup(app: Application) -> None:
     await on_startup_register_commands(app)
 
     jobs.schedule_daily_report(app, hour_utc=8)
+    jobs.schedule_platform_client_link_sync(app, interval_minutes=30)
 
     me = await app.bot.get_me()
     logger.success(f"Bot connected: @{me.username} (id={me.id})")

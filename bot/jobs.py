@@ -4,6 +4,7 @@ Background jobs driven by Telegram's JobQueue.
 Currently scheduled:
     * onboarding reminders — N hours after start, ping users who
       haven't finished the checklist (capped by max_reminders)
+    * platform client link sync — every 30 min, Members ↔ Vantage/Premier
 
 JobQueue requires the `python-telegram-bot[job-queue]` extra (APScheduler).
 """
@@ -23,6 +24,7 @@ from config import settings
 
 REMINDER_JOB_PREFIX = "onb_reminder_"
 DAILY_REPORT_JOB = "daily_revenue_report"
+PLATFORM_LINK_JOB = "platform_client_link_sync"
 
 
 # ---------- Public API ----------
@@ -137,6 +139,37 @@ def schedule_daily_report(app: Application, hour_utc: int = 8) -> None:
         name=DAILY_REPORT_JOB,
     )
     logger.info(f"Scheduled daily revenue report at {hour_utc:02d}:00 UTC")
+
+
+def schedule_platform_client_link_sync(
+    app: Application, *, interval_minutes: int = 30
+) -> None:
+    """Periodically link Members ↔ Vantage/Premier clients by Platform User ID."""
+    if app.job_queue is None:
+        logger.warning("JobQueue unavailable — platform client sync not scheduled")
+        return
+
+    for job in app.job_queue.get_jobs_by_name(PLATFORM_LINK_JOB):
+        job.schedule_removal()
+
+    app.job_queue.run_repeating(
+        _sync_platform_client_links,
+        interval=timedelta(minutes=interval_minutes),
+        first=timedelta(seconds=90),
+        name=PLATFORM_LINK_JOB,
+    )
+    logger.info(
+        f"Scheduled platform client link sync every {interval_minutes} minutes"
+    )
+
+
+async def _sync_platform_client_links(context: ContextTypes.DEFAULT_TYPE) -> None:
+    from airtable import sync as airtable_sync
+
+    result = await airtable_sync.link_all_platform_clients()
+    linked = int(result.get("linked", 0))
+    if linked:
+        logger.info(f"Platform client auto-link: {linked} new link(s) — {result}")
 
 
 async def _send_daily_report(context: ContextTypes.DEFAULT_TYPE) -> None:

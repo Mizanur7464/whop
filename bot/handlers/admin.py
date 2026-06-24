@@ -652,7 +652,8 @@ async def cmd_sync(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         f"• Duplicate groups merged: *{dedupe.get('groups_merged', 0)}* "
         f"(`{dedupe.get('rows_before', 0)}` → `{dedupe.get('rows_after', 0)}` rows)\n"
         f"• Platform client links: *{client_links.get('linked', 0)}* linked, "
-        f"*{client_links.get('missing_client', 0)}* UID not in client table"
+        f"*{client_links.get('missing_client', 0)}* UID not in client table, "
+        f"*{client_links.get('missing_member', 0)}* client UID not in Members"
     )
     await update.message.reply_text(body, parse_mode=ParseMode.MARKDOWN)
 
@@ -675,7 +676,8 @@ async def cmd_fix_members_crm(update: Update, _: ContextTypes.DEFAULT_TYPE) -> N
         f"• Failed: *{members.get('failed', 0)}*\n"
         f"• Duplicate groups merged: *{dedupe.get('groups_merged', 0)}*\n"
         f"• All-member client scan: *{links.get('linked', 0)}* linked, "
-        f"*{links.get('missing_client', 0)}* no matching UID",
+        f"*{links.get('missing_client', 0)}* no matching client UID, "
+        f"*{links.get('missing_member', 0)}* client UID not in Members",
         parse_mode=ParseMode.MARKDOWN,
     )
 
