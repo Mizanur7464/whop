@@ -156,6 +156,51 @@ class Settings(BaseSettings):
     public_app_base_url: str = Field(default="", alias="PUBLIC_APP_BASE_URL")
     safe_mode: bool = Field(default=True, alias="SAFE_MODE")
     rollout_mode: str = Field(default="new_only", alias="ROLLOUT_MODE")
+    telegram_forum_hide_general: bool = Field(
+        default=True, alias="TELEGRAM_FORUM_HIDE_GENERAL"
+    )
+    telegram_entry_topic_id: Optional[int] = Field(
+        default=None, alias="TELEGRAM_ENTRY_TOPIC_ID"
+    )
+    telegram_service_message_cleanup: bool = Field(
+        default=True, alias="TELEGRAM_SERVICE_MESSAGE_CLEANUP"
+    )
+    telegram_chat_mirror_enabled: bool = Field(
+        default=True, alias="TELEGRAM_CHAT_MIRROR_ENABLED"
+    )
+    telegram_chat_mirror_source_group_id: Optional[int] = Field(
+        default=None, alias="TELEGRAM_CHAT_MIRROR_SOURCE_GROUP_ID"
+    )
+    telegram_chat_mirror_source_topic_id: Optional[int] = Field(
+        default=None, alias="TELEGRAM_CHAT_MIRROR_SOURCE_TOPIC_ID"
+    )
+    telegram_chat_mirror_dest_group_id: Optional[int] = Field(
+        default=None, alias="TELEGRAM_CHAT_MIRROR_DEST_GROUP_ID"
+    )
+    telegram_chat_mirror_dest_topic_id: Optional[int] = Field(
+        default=None, alias="TELEGRAM_CHAT_MIRROR_DEST_TOPIC_ID"
+    )
+    telegram_results_mirror_enabled: bool = Field(
+        default=True, alias="TELEGRAM_RESULTS_MIRROR_ENABLED"
+    )
+    telegram_results_mirror_source_group_id: Optional[int] = Field(
+        default=None, alias="TELEGRAM_RESULTS_MIRROR_SOURCE_GROUP_ID"
+    )
+    telegram_results_mirror_source_topic_id: Optional[int] = Field(
+        default=None, alias="TELEGRAM_RESULTS_MIRROR_SOURCE_TOPIC_ID"
+    )
+    telegram_results_mirror_dest_group_id: Optional[int] = Field(
+        default=None, alias="TELEGRAM_RESULTS_MIRROR_DEST_GROUP_ID"
+    )
+    telegram_results_mirror_dest_topic_id: Optional[int] = Field(
+        default=None, alias="TELEGRAM_RESULTS_MIRROR_DEST_TOPIC_ID"
+    )
+    telegram_lobby_welcome_dm_enabled: bool = Field(
+        default=True, alias="TELEGRAM_LOBBY_WELCOME_DM_ENABLED"
+    )
+    telegram_lobby_welcome_dm_text: str = Field(
+        default="", alias="TELEGRAM_LOBBY_WELCOME_DM_TEXT"
+    )
     group_moderation_enabled: bool = Field(
         default=True, alias="GROUP_MODERATION_DELETE_MEMBER_MESSAGES"
     )
@@ -221,6 +266,15 @@ class Settings(BaseSettings):
         "telegram_topic_members_results",
         "telegram_topic_pnl",
         "telegram_topic_notifications",
+        "telegram_entry_topic_id",
+        "telegram_chat_mirror_source_group_id",
+        "telegram_chat_mirror_source_topic_id",
+        "telegram_chat_mirror_dest_group_id",
+        "telegram_chat_mirror_dest_topic_id",
+        "telegram_results_mirror_source_group_id",
+        "telegram_results_mirror_source_topic_id",
+        "telegram_results_mirror_dest_group_id",
+        "telegram_results_mirror_dest_topic_id",
         mode="before",
     )
     @classmethod

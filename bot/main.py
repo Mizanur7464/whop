@@ -55,8 +55,10 @@ from bot import (
     support_form_config,
 )
 from bot.command_registry import on_startup_register_commands
-from bot import group_moderation
+from bot import chat_mirror, group_moderation, results_mirror, service_messages
 from bot.channel_context import swallow_welcome_group_member_command
+from bot.forum_setup import apply_forum_setup
+from bot.lobby_welcome import on_user_joined_lobby_group
 from bot.command_gate import block_until_main_group
 from bot.main_group_access import on_user_joined_main_group
 from config import settings
@@ -96,6 +98,7 @@ async def _on_startup(app: Application) -> None:
 
     jobs.schedule_daily_report(app, hour_utc=8)
     jobs.schedule_platform_client_link_sync(app, interval_minutes=30)
+    await apply_forum_setup(app.bot)
 
     me = await app.bot.get_me()
     logger.success(f"Bot connected: @{me.username} (id={me.id})")
@@ -193,6 +196,22 @@ def build_app() -> Application:
             block=True,
         )
     )
+    monitored_groups: list[int] = []
+    if settings.telegram_main_group_id:
+        monitored_groups.append(settings.telegram_main_group_id)
+    if settings.telegram_welcome_group_id:
+        monitored_groups.append(settings.telegram_welcome_group_id)
+
+    if monitored_groups:
+        service_filter = filters.Chat(monitored_groups) & (
+            filters.StatusUpdate.LEFT_CHAT_MEMBER
+            | filters.StatusUpdate.NEW_CHAT_MEMBERS
+        )
+        app.add_handler(MessageHandler(service_filter, service_messages.on_service_message))
+        logger.info(
+            f"Service message cleanup ON for chats {monitored_groups}"
+        )
+
     if settings.telegram_main_group_id or settings.telegram_welcome_group_id:
         app.add_handler(
             ChatMemberHandler(
@@ -210,6 +229,36 @@ def build_app() -> Application:
                 ChatMemberHandler.CHAT_MEMBER,
             )
         )
+        if chat_mirror.mirror_enabled():
+            app.add_handler(
+                MessageHandler(
+                    main_group
+                    & ~filters.StatusUpdate.ALL
+                    & ~filters.COMMAND,
+                    chat_mirror.on_mirror_source_message,
+                ),
+                group=0,
+            )
+            logger.info(
+                "Chat mirror ON: main "
+                f"{chat_mirror.mirror_source_topic_id()} → lobby "
+                f"{chat_mirror.mirror_dest_topic_id()}"
+            )
+        if results_mirror.results_mirror_enabled():
+            app.add_handler(
+                MessageHandler(
+                    main_group
+                    & ~filters.StatusUpdate.ALL
+                    & ~filters.COMMAND,
+                    results_mirror.on_results_source_message,
+                ),
+                group=0,
+            )
+            logger.info(
+                "Results mirror ON: main "
+                f"{results_mirror.results_source_topic_id()} → lobby "
+                f"{results_mirror.results_dest_topic_id()}"
+            )
         if settings.group_moderation_enabled:
             app.add_handler(
                 MessageHandler(
@@ -223,19 +272,42 @@ def build_app() -> Application:
                 f"{group_moderation.moderation_summary()}"
             )
 
-    if settings.telegram_welcome_group_id and settings.group_moderation_enabled:
+    if settings.telegram_welcome_group_id:
         welcome_group = filters.Chat(chat_id=settings.telegram_welcome_group_id)
         app.add_handler(
-            MessageHandler(
-                welcome_group & ~filters.StatusUpdate.ALL,
-                group_moderation.on_welcome_group_message,
-            ),
-            group=-1,
+            ChatMemberHandler(
+                on_user_joined_lobby_group,
+                ChatMemberHandler.CHAT_MEMBER,
+            )
         )
-        logger.info(
-            f"Group moderation ON for welcome group {settings.telegram_welcome_group_id}\n"
-            f"{group_moderation.moderation_summary()}"
-        )
+        if chat_mirror.mirror_enabled():
+            app.add_handler(
+                MessageHandler(
+                    welcome_group & ~filters.StatusUpdate.ALL & ~filters.COMMAND,
+                    chat_mirror.on_mirror_dest_message,
+                ),
+                group=0,
+            )
+        if results_mirror.results_mirror_enabled():
+            app.add_handler(
+                MessageHandler(
+                    welcome_group & ~filters.StatusUpdate.ALL & ~filters.COMMAND,
+                    results_mirror.on_results_dest_message,
+                ),
+                group=0,
+            )
+        if settings.group_moderation_enabled:
+            app.add_handler(
+                MessageHandler(
+                    welcome_group & ~filters.StatusUpdate.ALL,
+                    group_moderation.on_welcome_group_message,
+                ),
+                group=-1,
+            )
+            logger.info(
+                f"Group moderation ON for welcome group {settings.telegram_welcome_group_id}\n"
+                f"{group_moderation.moderation_summary()}"
+            )
     app.add_handler(
         CallbackQueryHandler(leave_survey.on_leave_callback, pattern=r"^lv:")
     )

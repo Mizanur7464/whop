@@ -46,6 +46,23 @@ def _parse_topic_id_csv(raw: str) -> set[int]:
     return ids
 
 
+def _mirror_readonly_welcome_topics() -> frozenset[int]:
+    """Lobby topics used as read-only chat mirrors (members may not post)."""
+    if not settings.telegram_chat_mirror_enabled:
+        return frozenset()
+    gid = (
+        settings.telegram_chat_mirror_dest_group_id
+        or settings.telegram_welcome_group_id
+    )
+    if not gid:
+        return frozenset()
+    tid = (
+        settings.telegram_chat_mirror_dest_topic_id
+        or settings.telegram_welcome_group_topic_members_community
+    )
+    return frozenset({tid}) if tid else frozenset()
+
+
 def welcome_member_chat_topic_ids() -> frozenset[int]:
     """Welcome group topics where members may chat."""
     ids: set[int] = set()
@@ -56,6 +73,7 @@ def welcome_member_chat_topic_ids() -> frozenset[int]:
         if isinstance(tid, int):
             ids.add(tid)
     ids.update(_parse_topic_id_csv(settings.group_moderation_welcome_member_chat_topics_csv))
+    ids -= set(_mirror_readonly_welcome_topics())
     return frozenset(ids)
 
 
@@ -146,7 +164,7 @@ def message_contains_link(msg: Message) -> bool:
     text = (msg.text or msg.caption or "").strip()
     if text and _LINK_HINT_RE.search(text):
         return True
-    for ent in (msg.entities or []) + (msg.caption_entities or []):
+    for ent in tuple(msg.entities or ()) + tuple(msg.caption_entities or ()):
         if ent.type in (MessageEntityType.URL, MessageEntityType.TEXT_LINK):
             return True
     return False
@@ -279,9 +297,11 @@ def moderation_summary() -> str:
     main_chat = sorted(main_member_chat_topic_ids())
     no_links = sorted(no_links_topic_ids())
     main_blocked = sorted(main_admin_only_topic_ids())
+    mirror_dest = sorted(_mirror_readonly_welcome_topics())
     lines = [
         f"Main member chat (e.g. Members Results): {main_chat or 'NOT SET — TELEGRAM_TOPIC_MEMBERS_RESULTS'}",
         f"Welcome member chat: {welcome_chat or 'NOT SET'}",
+        f"Lobby mirror read-only topics: {mirror_dest or 'off'}",
         f"Link ban topics: {no_links or 'member-chat topics when unset'}",
         f"Main admin-only topic IDs: {main_blocked or 'none configured'}",
     ]

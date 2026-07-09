@@ -13,6 +13,7 @@ from pathlib import Path
 from loguru import logger
 
 from bot.community_layout import build_unlock_dm_text, uses_topics_mode
+from bot.forum_links import entry_topic_deep_link
 from config import settings
 from integrations import telegram_ops
 
@@ -73,14 +74,19 @@ async def _unlock_topics_mode(telegram_user_id: int) -> dict:
         return {"ok": True, "safe_mode": True, "channels": [gid]}
 
     link = await telegram_ops.generate_invite_link(gid, name="fusion-welcome")
+    topic_link = await entry_topic_deep_link(telegram_ops.bot(), chat_id=gid)
     if link:
         text = f"{body}\n\nJoin the community:\n{link}"
+        if topic_link:
+            text += f"\n\nOpen Signals:\n{topic_link}"
     else:
         text = (
             f"{body}\n\n"
             "We could not generate an invite link automatically. "
             "An admin will add you to the group."
         )
+        if topic_link:
+            text += f"\n\nOpen Signals:\n{topic_link}"
     ok = await telegram_ops.dm(telegram_user_id, text, parse_mode=None)
     return {"ok": ok, "safe_mode": False, "channels": [gid], "mode": "topics"}
 
