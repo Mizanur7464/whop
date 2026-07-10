@@ -34,6 +34,7 @@ def mirror_source_group_id() -> int | None:
 def mirror_source_topic_id() -> int | None:
     return (
         settings.telegram_chat_mirror_source_topic_id
+        or settings.telegram_topic_members_chat
         or settings.telegram_topic_members_results
     )
 
@@ -133,9 +134,6 @@ async def on_mirror_source_message(
         return
 
     if msg.text and msg.text.startswith("/"):
-        return
-
-    if await user_may_post_in_group(context, msg.chat_id, user.id):
         return
 
     try:

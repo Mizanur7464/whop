@@ -78,8 +78,10 @@ def welcome_member_chat_topic_ids() -> frozenset[int]:
 
 
 def main_member_chat_topic_ids() -> frozenset[int]:
-    """Main group topics where members may chat (Members Results)."""
+    """Main group topics where members may chat (Members Chat + Members Results)."""
     ids: set[int] = set()
+    if isinstance(settings.telegram_topic_members_chat, int):
+        ids.add(settings.telegram_topic_members_chat)
     if isinstance(settings.telegram_topic_members_results, int):
         ids.add(settings.telegram_topic_members_results)
     ids.update(_parse_topic_id_csv(settings.group_moderation_member_chat_topics_csv))
@@ -299,7 +301,7 @@ def moderation_summary() -> str:
     main_blocked = sorted(main_admin_only_topic_ids())
     mirror_dest = sorted(_mirror_readonly_welcome_topics())
     lines = [
-        f"Main member chat (e.g. Members Results): {main_chat or 'NOT SET — TELEGRAM_TOPIC_MEMBERS_RESULTS'}",
+        f"Main member chat (Members Chat / Members Results): {main_chat or 'NOT SET'}",
         f"Welcome member chat: {welcome_chat or 'NOT SET'}",
         f"Lobby mirror read-only topics: {mirror_dest or 'off'}",
         f"Link ban topics: {no_links or 'member-chat topics when unset'}",

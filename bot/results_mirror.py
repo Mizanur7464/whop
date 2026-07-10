@@ -106,9 +106,6 @@ async def on_results_source_message(
     if msg.message_thread_id != results_source_topic_id():
         return
 
-    if not await user_may_post_in_group(context, msg.chat_id, user.id):
-        return
-
     if msg.text and msg.text.startswith("/"):
         return
 
