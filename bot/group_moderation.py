@@ -48,19 +48,22 @@ def _parse_topic_id_csv(raw: str) -> set[int]:
 
 def _mirror_readonly_welcome_topics() -> frozenset[int]:
     """Lobby topics used as read-only chat mirrors (members may not post)."""
-    if not settings.telegram_chat_mirror_enabled:
-        return frozenset()
-    gid = (
-        settings.telegram_chat_mirror_dest_group_id
-        or settings.telegram_welcome_group_id
-    )
-    if not gid:
-        return frozenset()
-    tid = (
-        settings.telegram_chat_mirror_dest_topic_id
-        or settings.telegram_welcome_group_topic_members_community
-    )
-    return frozenset({tid}) if tid else frozenset()
+    ids: set[int] = set()
+    if settings.telegram_chat_mirror_enabled:
+        tid = (
+            settings.telegram_chat_mirror_dest_topic_id
+            or settings.telegram_welcome_group_topic_members_community
+        )
+        if tid:
+            ids.add(tid)
+    if settings.telegram_results_mirror_enabled:
+        tid = (
+            settings.telegram_results_mirror_dest_topic_id
+            or settings.telegram_welcome_group_topic_results
+        )
+        if tid:
+            ids.add(tid)
+    return frozenset(ids)
 
 
 def welcome_member_chat_topic_ids() -> frozenset[int]:
