@@ -230,30 +230,12 @@ def build_app() -> Application:
             )
         )
         if chat_mirror.mirror_enabled():
-            app.add_handler(
-                MessageHandler(
-                    main_group
-                    & ~filters.StatusUpdate.ALL
-                    & ~filters.COMMAND,
-                    chat_mirror.on_mirror_source_message,
-                ),
-                group=0,
-            )
             logger.info(
                 "Chat mirror ON: main "
                 f"{chat_mirror.mirror_source_topic_id()} → lobby "
                 f"{chat_mirror.mirror_dest_topic_id()}"
             )
         if results_mirror.results_mirror_enabled():
-            app.add_handler(
-                MessageHandler(
-                    main_group
-                    & ~filters.StatusUpdate.ALL
-                    & ~filters.COMMAND,
-                    results_mirror.on_results_source_message,
-                ),
-                group=0,
-            )
             logger.info(
                 "Results mirror ON: main "
                 f"{results_mirror.results_source_topic_id()} → lobby "
@@ -271,6 +253,24 @@ def build_app() -> Application:
                 f"Group moderation ON for main group {settings.telegram_main_group_id}\n"
                 f"{group_moderation.moderation_summary()}"
             )
+        elif chat_mirror.mirror_enabled() or results_mirror.results_mirror_enabled():
+            # Moderation off — still mirror via dedicated handlers
+            if chat_mirror.mirror_enabled():
+                app.add_handler(
+                    MessageHandler(
+                        main_group & ~filters.StatusUpdate.ALL & ~filters.COMMAND,
+                        chat_mirror.on_mirror_source_message,
+                    ),
+                    group=0,
+                )
+            if results_mirror.results_mirror_enabled():
+                app.add_handler(
+                    MessageHandler(
+                        main_group & ~filters.StatusUpdate.ALL & ~filters.COMMAND,
+                        results_mirror.on_results_source_message,
+                    ),
+                    group=0,
+                )
 
     if settings.telegram_welcome_group_id:
         welcome_group = filters.Chat(chat_id=settings.telegram_welcome_group_id)

@@ -45,6 +45,8 @@ async def mirror_message_to_topic(
     body = (msg.text or msg.caption or "").strip()
     prefix = f"💬 {author}"
     text = f"{prefix}\n{body}" if body else prefix
+    dest_group_id = int(dest_group_id)
+    dest_topic_id = int(dest_topic_id)
 
     try:
         if msg.text and not _has_mirrorable_media(msg):
@@ -56,7 +58,7 @@ async def mirror_message_to_topic(
             )
             return True
 
-        if _has_mirrorable_media(msg) or msg.forward_origin or msg.forward_date:
+        if _has_mirrorable_media(msg) or getattr(msg, "forward_origin", None) or getattr(msg, "forward_date", None):
             kwargs: dict = {
                 "chat_id": dest_group_id,
                 "from_chat_id": msg.chat_id,
@@ -76,7 +78,30 @@ async def mirror_message_to_topic(
                 disable_web_page_preview=True,
             )
             return True
+
+        # Last resort: copy whatever Telegram gave us
+        await context.bot.copy_message(
+            chat_id=dest_group_id,
+            from_chat_id=msg.chat_id,
+            message_id=msg.message_id,
+            message_thread_id=dest_topic_id,
+        )
+        return True
     except TelegramError as e:
-        logger.warning(f"{label}: mirror failed msg={msg.message_id}: {e}")
+        logger.error(
+            f"{label}: mirror failed msg={msg.message_id} "
+            f"→ {dest_group_id}/{dest_topic_id}: {e}"
+        )
+        if body:
+            try:
+                await context.bot.send_message(
+                    chat_id=dest_group_id,
+                    message_thread_id=dest_topic_id,
+                    text=text[:4096],
+                    disable_web_page_preview=True,
+                )
+                return True
+            except TelegramError as e2:
+                logger.error(f"{label}: text fallback also failed: {e2}")
 
     return False

@@ -33,10 +33,11 @@ def mirror_source_group_id() -> int | None:
 
 
 def mirror_source_topic_id() -> int | None:
-    return (
+    raw = (
         settings.telegram_chat_mirror_source_topic_id
         or settings.telegram_topic_members_chat
     )
+    return int(raw) if raw is not None else None
 
 
 def mirror_dest_group_id() -> int | None:
@@ -47,10 +48,11 @@ def mirror_dest_group_id() -> int | None:
 
 
 def mirror_dest_topic_id() -> int | None:
-    return (
+    raw = (
         settings.telegram_chat_mirror_dest_topic_id
         or settings.telegram_welcome_group_topic_members_community
     )
+    return int(raw) if raw is not None else None
 
 
 def mirror_readonly_topic_ids() -> frozenset[int]:
@@ -60,10 +62,8 @@ def mirror_readonly_topic_ids() -> frozenset[int]:
     return frozenset({dest}) if dest else frozenset()
 
 
-async def on_mirror_source_message(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
-    """Copy posts from main Members Chat → lobby Members chat."""
+async def try_mirror_source(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Mirror one main-group Members Chat message to lobby (safe to call always)."""
     if not mirror_enabled():
         return
 
@@ -79,7 +79,9 @@ async def on_mirror_source_message(
     if not source_group or not source_topic or not dest_group or not dest_topic:
         return
 
-    if msg.chat_id != source_group or msg.message_thread_id != source_topic:
+    if msg.chat_id != source_group:
+        return
+    if msg.message_thread_id is None or int(msg.message_thread_id) != source_topic:
         return
 
     if msg.text and msg.text.startswith("/"):
@@ -88,15 +90,26 @@ async def on_mirror_source_message(
     ok = await mirror_message_to_topic(
         msg,
         context,
-        dest_group_id=dest_group,
-        dest_topic_id=dest_topic,
+        dest_group_id=int(dest_group),
+        dest_topic_id=int(dest_topic),
         label="chat_mirror",
     )
     if ok:
         logger.info(
-            f"chat_mirror: mirrored msg {msg.message_id} "
+            f"chat_mirror: OK msg={msg.message_id} "
             f"{source_group}/{source_topic} → {dest_group}/{dest_topic}"
         )
+    else:
+        logger.error(
+            f"chat_mirror: FAILED msg={msg.message_id} "
+            f"{source_group}/{source_topic} → {dest_group}/{dest_topic}"
+        )
+
+
+async def on_mirror_source_message(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    await try_mirror_source(update, context)
 
 
 async def on_mirror_dest_message(
@@ -113,7 +126,9 @@ async def on_mirror_dest_message(
 
     dest_group = mirror_dest_group_id()
     dest_topic = mirror_dest_topic_id()
-    if msg.chat_id != dest_group or msg.message_thread_id != dest_topic:
+    if msg.chat_id != dest_group:
+        return
+    if msg.message_thread_id is None or int(msg.message_thread_id) != dest_topic:
         return
 
     if await user_may_post_in_group(context, msg.chat_id, user.id):

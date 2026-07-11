@@ -286,6 +286,11 @@ async def on_main_group_message(
     if not is_main_group(update):
         return
     await _moderate_message(update, context, main_group=True)
+    # Same update path as moderation — guarantees results/chat mirror see the message
+    from bot import chat_mirror, results_mirror
+
+    await chat_mirror.try_mirror_source(update, context)
+    await results_mirror.try_mirror_source(update, context)
 
 
 async def on_welcome_group_message(
