@@ -307,6 +307,12 @@ def moderation_summary() -> str:
         f"Main member chat (Members Chat / Members Results): {main_chat or 'NOT SET'}",
         f"Welcome member chat: {welcome_chat or 'NOT SET'}",
         f"Lobby mirror read-only topics: {mirror_dest or 'off'}",
+        (
+            "Results mirror: "
+            f"{settings.telegram_results_mirror_source_topic_id or settings.telegram_topic_members_results}"
+            f" → "
+            f"{settings.telegram_results_mirror_dest_topic_id or settings.telegram_welcome_group_topic_results}"
+        ),
         f"Link ban topics: {no_links or 'member-chat topics when unset'}",
         f"Main admin-only topic IDs: {main_blocked or 'none configured'}",
     ]

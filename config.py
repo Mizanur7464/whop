@@ -296,7 +296,7 @@ class Settings(BaseSettings):
         if isinstance(v, int):
             return v
         if isinstance(v, str):
-            s = v.strip()
+            s = v.strip().strip('"').strip("'").strip()
             if not s:
                 return None
             # common placeholder patterns in templates
