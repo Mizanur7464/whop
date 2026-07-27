@@ -470,6 +470,11 @@ async def member_platform_selected(
         return
     try:
         linked = _linked_whop(telegram_user_id)
+        if not linked.get("whop_user_id"):
+            logger.info(
+                f"Airtable: skip platform sync — no Whop link tg={telegram_user_id}"
+            )
+            return
         await c.upsert_member(
             telegram_user_id=telegram_user_id,
             telegram_username=telegram_username,
@@ -510,6 +515,11 @@ async def member_contact_collected(
         return
     try:
         linked = _linked_whop(telegram_user_id)
+        if not linked.get("whop_user_id"):
+            logger.info(
+                f"Airtable: skip contact sync — no Whop link tg={telegram_user_id}"
+            )
+            return
         await c.upsert_member(
             telegram_user_id=telegram_user_id,
             telegram_username=telegram_username,

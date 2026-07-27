@@ -23,13 +23,37 @@ def parse_whop_payment_amounts(entity: dict) -> tuple[float, float, float, str]:
     * *fees* — Whop / platform transaction fees
     * *net_amount* — amount minus fees (seller payout)
     """
-    currency = str(entity.get("currency") or "USD").upper()
+    payment = entity.get("payment") if isinstance(entity.get("payment"), dict) else {}
+    plan = entity.get("plan") if isinstance(entity.get("plan"), dict) else {}
+    product = entity.get("product") if isinstance(entity.get("product"), dict) else {}
+    renewal = (
+        entity.get("renewal")
+        if isinstance(entity.get("renewal"), dict)
+        else {}
+    )
+
+    currency = str(
+        entity.get("currency")
+        or payment.get("currency")
+        or plan.get("currency")
+        or product.get("currency")
+        or "USD"
+    ).upper()
 
     amount = _to_major(
         entity.get("amount")
         or entity.get("subtotal")
         or entity.get("total")
         or entity.get("total_amount")
+        or payment.get("amount")
+        or payment.get("subtotal")
+        or payment.get("total")
+        or payment.get("total_amount")
+        or renewal.get("amount")
+        or plan.get("renewal_price")
+        or plan.get("price")
+        or product.get("renewal_price")
+        or product.get("price")
         or 0
     )
 
@@ -40,6 +64,12 @@ def parse_whop_payment_amounts(entity: dict) -> tuple[float, float, float, str]:
         or entity.get("platform_fee")
         or entity.get("whop_fee")
         or entity.get("transaction_fee")
+        or payment.get("fees")
+        or payment.get("application_fee")
+        or payment.get("application_fee_amount")
+        or payment.get("platform_fee")
+        or payment.get("whop_fee")
+        or payment.get("transaction_fee")
     )
     fees = _to_major(fees_raw) if fees_raw is not None else 0.0
 
@@ -49,6 +79,11 @@ def parse_whop_payment_amounts(entity: dict) -> tuple[float, float, float, str]:
         or entity.get("seller_amount")
         or entity.get("payout_amount")
         or entity.get("amount_after_fees")
+        or payment.get("net_amount")
+        or payment.get("net")
+        or payment.get("seller_amount")
+        or payment.get("payout_amount")
+        or payment.get("amount_after_fees")
     )
     if net_raw is not None:
         net_amount = _to_major(net_raw)

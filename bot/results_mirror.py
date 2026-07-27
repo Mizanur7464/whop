@@ -8,7 +8,7 @@ from telegram.error import BadRequest, TelegramError
 from telegram.ext import ContextTypes
 
 from bot.group_moderation import user_may_post_in_group
-from bot.mirror_utils import mirror_message_to_topic
+from bot.mirror_utils import mark_message_mirrored, mirror_message_to_topic, should_skip_mirror
 from config import settings
 
 
@@ -85,6 +85,9 @@ async def try_mirror_source(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     if msg.text and msg.text.startswith("/"):
         return
 
+    if should_skip_mirror(update, msg):
+        return
+
     logger.info(
         f"results_mirror: attempt msg={msg.message_id} "
         f"thread={msg.message_thread_id} → {dest_group}/{dest_topic}"
@@ -97,6 +100,7 @@ async def try_mirror_source(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         label="results_mirror",
     )
     if ok:
+        mark_message_mirrored(msg)
         logger.info(
             f"results_mirror: OK msg={msg.message_id} "
             f"{source_group}/{source_topic} → {dest_group}/{dest_topic}"

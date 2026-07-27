@@ -17,6 +17,7 @@ from bot.access import idle_after_complete_message, shows_main_menu
 from bot.channel_context import ensure_private_dm
 from bot.community_layout import FLOW_WELCOME
 from bot.decorators import log_call
+from bot.whop_access import block_without_whop_link
 
 
 def _progress_bar(done: int, total: int, width: int = 10) -> str:
@@ -52,6 +53,8 @@ async def cmd_checklist(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         return
 
     user = update.effective_user
+    if await block_without_whop_link(update, context):
+        return
     if not shows_main_menu(user.id):
         await update.message.reply_text(idle_after_complete_message())
         return

@@ -80,6 +80,10 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     if onboarding.needs_onboarding(user.id):
+        if chat and chat.type == "private" and not is_admin(user.id):
+            if not storage.has_whop_link(user.id):
+                await claim.prompt_whop_activation(update, context)
+                return
         await onboarding.show_welcome(update, context)
         jobs.schedule_onboarding_reminder(context.application, user.id)
         return

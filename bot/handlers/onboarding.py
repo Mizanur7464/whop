@@ -43,6 +43,7 @@ from bot.telegram_utils import (
 )
 from bot import terms_config
 from bot.welcome_docs import location_by_id, get as get_welcome_docs
+from bot.whop_access import block_without_whop_link
 
 CONTACT_STEP_KEY = "onboarding_contact_step"
 
@@ -175,6 +176,8 @@ async def _send_new_message(
 
 async def show_welcome(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Step 1: Nice welcome message only."""
+    if await block_without_whop_link(update, context):
+        return
     if await _onboarding_blocked_for_user(update, context):
         return
 
@@ -622,6 +625,8 @@ async def on_screenshot_photo(
         update, context, flow=FLOW_WELCOME, command="start"
     ):
         return
+    if await block_without_whop_link(update, context):
+        return
 
     user = update.effective_user
     if not user or not update.message or not update.message.photo:
@@ -861,6 +866,8 @@ async def on_onboarding_callback(
         update, context, flow=FLOW_WELCOME, command="onboarding"
     ):
         return
+    if await block_without_whop_link(update, context):
+        return
 
     query = update.callback_query
     data = query.data or "" if query else ""
@@ -966,6 +973,8 @@ async def cmd_onboarding(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     user = update.effective_user
     if not user:
+        return
+    if await block_without_whop_link(update, context):
         return
     if await _onboarding_blocked_for_user(update, context):
         return

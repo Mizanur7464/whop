@@ -132,9 +132,8 @@ def _resolve_payment_id(
         return raw_id.strip()
 
     if allow_membership_fallback:
-        amount, _, net_amount, _ = parse_whop_payment_amounts(entity)
         membership_id = _membership_id(entity)
-        if membership_id and (amount > 0 or net_amount > 0):
+        if membership_id:
             return f"{membership_id}-initial"
 
     amount, _, net_amount, _ = parse_whop_payment_amounts(entity)
@@ -551,4 +550,7 @@ _ROUTES: dict[str, Handler] = {
     "membership_payment_succeeded": on_payment_succeeded,
     "invoice_paid": on_payment_succeeded,
     "invoice_payment_succeeded": on_payment_succeeded,
+    "checkout_completed": on_payment_succeeded,
+    "order_paid": on_payment_succeeded,
+    "charge_succeeded": on_payment_succeeded,
 }

@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+import time
+
 from loguru import logger
-from telegram import Message
+from telegram import Message, Update
 from telegram.error import TelegramError
 from telegram.ext import ContextTypes
+
+_MIRROR_DEDUP_TTL_SEC = 3600.0
+_mirrored_message_ids: dict[tuple[int, int], float] = {}
 
 
 def author_label(msg: Message) -> str:
@@ -17,6 +22,31 @@ def author_label(msg: Message) -> str:
     if user.username:
         return f"@{user.username}"
     return str(user.id)
+
+
+def should_skip_mirror(update: Update, msg: Message) -> bool:
+    """Skip edits/reactions and already-mirrored source messages."""
+    if update.edited_message is not None:
+        return True
+    if msg.edit_date is not None:
+        return True
+
+    key = (msg.chat_id, msg.message_id)
+    now = time.monotonic()
+    expires = _mirrored_message_ids.get(key)
+    if expires is not None and expires > now:
+        return True
+    return False
+
+
+def mark_message_mirrored(msg: Message) -> None:
+    key = (msg.chat_id, msg.message_id)
+    _mirrored_message_ids[key] = time.monotonic() + _MIRROR_DEDUP_TTL_SEC
+    if len(_mirrored_message_ids) > 5000:
+        cutoff = time.monotonic()
+        stale = [k for k, exp in _mirrored_message_ids.items() if exp <= cutoff]
+        for k in stale:
+            _mirrored_message_ids.pop(k, None)
 
 
 def _has_mirrorable_media(msg: Message) -> bool:
@@ -64,9 +94,8 @@ async def mirror_message_to_topic(
                 "from_chat_id": msg.chat_id,
                 "message_id": msg.message_id,
                 "message_thread_id": dest_topic_id,
+                "caption": text[:1024],
             }
-            if body:
-                kwargs["caption"] = text[:1024]
             await context.bot.copy_message(**kwargs)
             return True
 
@@ -85,6 +114,7 @@ async def mirror_message_to_topic(
             from_chat_id=msg.chat_id,
             message_id=msg.message_id,
             message_thread_id=dest_topic_id,
+            caption=text[:1024],
         )
         return True
     except TelegramError as e:

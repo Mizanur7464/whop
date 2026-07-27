@@ -13,8 +13,8 @@ from bot.decorators import is_admin
 from bot.main_group_access import needs_claim_only_menu, refresh_commands_for_user
 from integrations.whop_copy import claim_only_command_hint
 
-# onboarding runs its own main-group check and always replies
-_ALLOWED_BEFORE_MAIN = frozenset({"claim", "start", "onboarding", "welcome"})
+# onboarding requires Whop link; claim/start work before main group
+_ALLOWED_BEFORE_MAIN = frozenset({"claim", "start"})
 
 
 async def block_until_main_group(
